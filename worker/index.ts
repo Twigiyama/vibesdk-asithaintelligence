@@ -1,0 +1,349 @@
+import { createLogger } from './logger';
+import { isDispatcherAvailable } from './utils/dispatcherUtils';
+import { createApp } from './app';
+// import * as Sentry from '@sentry/cloudflare';
+// import { sentryOptions } from './observability/sentry';
+import { DORateLimitStore as BaseDORateLimitStore } from './services/rate-limit/DORateLimitStore';
+import { getPreviewDomain, getProtocolForHost, isSeparatePreviewDomain } from './utils/urls';
+import { proxyToAiGateway } from './services/aigateway-proxy/controller';
+import { isOriginAllowed } from './config/security';
+import { isDev } from './utils/envs';
+import { proxyToSandbox } from './services/sandbox/request-handler';
+import { handleGitProtocolRequest, isGitProtocolRequest } from './api/handlers/git-protocol';
+import {
+	handleSpacePreview,
+	matchSpacePreviewParams,
+} from './api/handlers/space-preview';
+import { getAgentStub } from './agents';
+import { AppService } from './database/services/AppService';
+import {
+	buildOwnerPreviewCookie,
+	readOwnerPreviewCookie,
+	readOwnerPreviewTokenFromQuery,
+	verifyOwnerPreviewToken,
+} from './utils/ownerPreviewToken';
+
+// Durable Object and Service exports
+export { UserAppSandboxService } from './services/sandbox/sandboxSdkClient';
+export { CodeGeneratorAgent } from './agents/core/codingAgent';
+export { UserSecretsStore } from './services/secrets/UserSecretsStore';
+// SpaceDO (same-worker integration) — git-backed files + preview/deploy for
+// `think` apps. Re-exported so wrangler can bind it via durable_objects.bindings.
+// AppDatabase is NOT exported here — it lives inside SpaceDO's Worker Loader
+// as a synthetic-worker class. See space/src/space/app-database-source.ts.
+export { SpaceDO } from '@space-do/space';
+// ThinkAgent (@cloudflare/think) — the agentic loop harness (model ↔ tools).
+// Bound as THINK_DO in wrangler.
+export { ThinkAgent } from './agents/think/ThinkAgent';
+
+// export const CodeGeneratorAgent = Sentry.instrumentDurableObjectWithSentry(sentryOptions, CodeGeneratorAgent);
+// export const DORateLimitStore = Sentry.instrumentDurableObjectWithSentry(sentryOptions, BaseDORateLimitStore);
+export const DORateLimitStore = BaseDORateLimitStore;
+
+// Logger for the main application and handlers
+const logger = createLogger('App');
+
+function setOriginControl(env: Env, request: Request, currentHeaders: Headers): Headers {
+    const origin = request.headers.get('Origin');
+    
+    if (origin && isOriginAllowed(env, origin)) {
+        currentHeaders.set('Access-Control-Allow-Origin', origin);
+    }
+    return currentHeaders;
+}
+
+/**
+ * Re-wrap a space-preview response with CORS headers so the main platform
+ * domain can cross-origin `fetch()` it (e.g. the preview-iframe availability
+ * probe). Allowed origins:
+ *  - The main platform domain (prod & staging via `CUSTOM_DOMAIN`).
+ *  - The preview domain itself (same-origin).
+ *  - Any origin in local dev (`isDev`).
+ * WebSocket upgrade responses are returned untouched since their bodies
+ * cannot be reconstructed.
+ */
+function withPreviewCorsHeaders(env: Env, request: Request, response: Response): Response {
+    if (response.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+        return response;
+    }
+
+    const origin = request.headers.get('Origin');
+    const allowedOrigins = [env.CUSTOM_DOMAIN, getPreviewDomain(env)]
+        .filter((host): host is string => !!host && host.trim() !== '')
+        .map((host) => `${getProtocolForHost(host)}://${host}`);
+
+    const headers = new Headers(response.headers);
+    if (origin && (isDev(env) || allowedOrigins.includes(origin))) {
+        headers.set('Access-Control-Allow-Origin', origin);
+        headers.set('Access-Control-Allow-Credentials', 'true');
+        headers.append('Vary', 'Origin');
+    }
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+    });
+}
+
+/**
+ * Handles requests for user-deployed applications on subdomains.
+ * It first attempts to proxy to a live development sandbox. If that fails,
+ * it dispatches the request to a permanently deployed worker via namespaces.
+ * This function will NOT fall back to the main worker.
+ *
+ * @param request The incoming Request object.
+ * @param env The environment bindings.
+ * @returns A Response object from the sandbox, the dispatched worker, or an error.
+ */
+async function handleUserAppRequest(request: Request, env: Env): Promise<Response> {
+	const url = new URL(request.url);
+	const { hostname } = url;
+	logger.info(`Handling user app request for: ${hostname}`);
+
+	// Check if this is an agent browser file serving request
+	// Pattern: b-{agentid}-{token}.{previewDomain}
+	const subdomain = hostname.split('.')[0];
+	if (subdomain.startsWith('b-')) {
+		// Extract agentId and token from subdomain
+		const withoutPrefix = subdomain.substring(2); // Remove 'b-'
+		const lastHyphenIndex = withoutPrefix.lastIndexOf('-');
+
+		if (lastHyphenIndex !== -1) {
+			const agentId = withoutPrefix.substring(0, lastHyphenIndex);
+			logger.info(`Agent browser file serving request for agent: ${agentId}`);
+
+			try {
+				const agentStub = await getAgentStub(env, agentId);
+				return await agentStub.handleBrowserFileServing(request);
+			} catch (error: any) {
+				logger.error(`Error forwarding to agent: ${error.message}`);
+				return new Response('Agent not found', { status: 404 });
+			}
+		}
+	}
+
+	// 1. Attempt to proxy to a live development sandbox.
+	// proxyToSandbox doesn't consume the request body on a miss, so no clone is needed here.
+	const sandboxResponse = await proxyToSandbox(request, env);
+	if (sandboxResponse) {
+		logger.info(`Serving response from sandbox for: ${hostname}`);
+        // If it was a websocket upgrade, we need to return the response as is
+        if (sandboxResponse.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+            logger.info(`Serving websocket response from sandbox for: ${hostname}`);
+            return sandboxResponse;
+        }
+		
+		// Add headers to identify this as a sandbox response
+		let headers = new Headers(sandboxResponse.headers);
+		
+        if (sandboxResponse.status === 500) {
+            headers.set('X-Preview-Type', 'sandbox-error');
+        } else {
+            headers.set('X-Preview-Type', 'sandbox');
+        }
+        headers = setOriginControl(env, request, headers);
+        headers.append('Vary', 'Origin');
+		headers.set('Access-Control-Expose-Headers', 'X-Preview-Type');
+		
+		return new Response(sandboxResponse.body, {
+			status: sandboxResponse.status,
+			statusText: sandboxResponse.statusText,
+			headers,
+		});
+	}
+
+	// 2. If sandbox misses, attempt to dispatch to a deployed worker.
+	logger.info(`Sandbox miss for ${hostname}, attempting dispatch to permanent worker.`);
+	if (!isDispatcherAvailable(env)) {
+		logger.warn(`Dispatcher not available, cannot serve: ${hostname}`);
+		return new Response('This application is not currently available.', { status: 404 });
+	}
+
+	// Extract the app name (e.g., "xyz" from "xyz.build.cloudflare.dev").
+	// This subdomain equals the app's `deploymentId`.
+	const appName = subdomain;
+
+	// --- Visibility gate: private deployed apps are reachable by the owner only ---
+	// Consult the app's CURRENT visibility on every dispatch request (primary DB,
+	// no cache) so a public->private toggle takes effect within ~1s. Without this,
+	// toggling an app private still left the deployed worker URL publicly served.
+	const appService = new AppService(env);
+	const ownership = await appService.getAppOwnershipByDeploymentId(appName);
+	if (!ownership) {
+		// Fail closed: no owning app row for this deployment id.
+		logger.warn(`No app found for deployment '${appName}', refusing dispatch.`);
+		return new Response('This application is not currently available.', { status: 404 });
+	}
+
+	let ownerAuthedViaQuery = false;
+	if (ownership.visibility === 'private' && ownership.userId) {
+		// Owner access on preview subdomains: main-domain session cookies are not
+		// sent cross-subdomain, so accept a deployment-scoped owner-preview token
+		// (query param on first hit, then an HttpOnly subdomain cookie).
+		const queryToken = readOwnerPreviewTokenFromQuery(url);
+		const cookieToken = readOwnerPreviewCookie(request);
+
+		let ownerId: string | null = null;
+		if (queryToken) {
+			ownerId = await verifyOwnerPreviewToken(env, queryToken, appName);
+			if (ownerId) ownerAuthedViaQuery = true;
+		}
+		if (!ownerId && cookieToken) {
+			ownerId = await verifyOwnerPreviewToken(env, cookieToken, appName);
+		}
+
+		if (!ownerId || ownerId !== ownership.userId) {
+			// Indistinguishable from a non-existent app (do not confirm existence).
+			return new Response('This application is not currently available.', { status: 404 });
+		}
+	}
+	// public apps, anonymous apps (userId === null), and verified owners fall through.
+
+	const dispatcher = env['DISPATCHER'];
+
+	try {
+		const worker = dispatcher.get(appName);
+		const dispatcherResponse = await worker.fetch(request);
+
+		// Add headers to identify this as a dispatcher response
+		let headers = new Headers(dispatcherResponse.headers);
+
+		headers.set('X-Preview-Type', 'dispatcher');
+        headers = setOriginControl(env, request, headers);
+        headers.append('Vary', 'Origin');
+		headers.set('Access-Control-Expose-Headers', 'X-Preview-Type');
+
+		// Bootstrap the subdomain-scoped owner cookie so subsequent requests
+		// (iframe sub-resources, client fetches) don't need the query token.
+		if (ownerAuthedViaQuery) {
+			headers.append(
+				'Set-Cookie',
+				buildOwnerPreviewCookie({ token: readOwnerPreviewTokenFromQuery(url)!, secure: url.protocol === 'https:' }),
+			);
+		}
+
+		return new Response(dispatcherResponse.body, {
+			status: dispatcherResponse.status,
+			statusText: dispatcherResponse.statusText,
+			headers,
+		});
+	} catch (error: any) {
+		// This block catches errors if the binding doesn't exist or if worker.fetch() fails.
+		logger.warn(`Error dispatching to worker '${appName}': ${error.message}`);
+
+		return new Response('An error occurred while loading this application.', { status: 500 });
+	}
+}
+
+/**
+ * Main Worker fetch handler with robust, secure routing.
+ */
+const worker = {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+        // logger.info(`Received request: ${request.method} ${request.url}`);
+		// --- Pre-flight Checks ---
+
+		// 1. Critical configuration check: Ensure custom domain is set.
+        const previewDomain = getPreviewDomain(env);
+		const separatePreviewDomain = isSeparatePreviewDomain(env);
+		if (!previewDomain || previewDomain.trim() === '') {
+			logger.error('FATAL: env.CUSTOM_DOMAIN is not configured in wrangler.toml or the Cloudflare dashboard.');
+			return new Response('Server configuration error: Application domain is not set.', { status: 500 });
+		}
+
+		const url = new URL(request.url);
+		const { hostname, pathname } = url;
+
+		// 2. Security: Immediately reject any requests made via an IP address.
+		const ipRegex = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+		if (ipRegex.test(hostname)) {
+			return new Response('Access denied. Please use the assigned domain name.', { status: 403 });
+		}
+
+		// --- Domain-based Routing ---
+
+		// Normalize hostnames for both local development (localhost) and production.
+		const isMainDomainRequest =
+			hostname === env.CUSTOM_DOMAIN || hostname === 'localhost';
+		const isSubdomainRequest =
+			hostname.endsWith(`.${previewDomain}`) ||
+			(hostname.endsWith('.localhost') && hostname !== 'localhost');
+
+		if (separatePreviewDomain && hostname === previewDomain) {
+			const params = matchSpacePreviewParams(pathname);
+			if (!params) {
+				return new Response('Not Found', { status: 404 });
+			}
+			const response = await handleSpacePreview(request, env, params.spaceName, params.branch);
+			return withPreviewCorsHeaders(env, request, response);
+		}
+
+		// Route 1: Main Platform Request (e.g., build.cloudflare.dev or localhost)
+		if (isMainDomainRequest) {
+			const params = matchSpacePreviewParams(pathname);
+			if (params) {
+				if (separatePreviewDomain) {
+					return new Response('Not Found', { status: 404 });
+				}
+				const response = await handleSpacePreview(request, env, params.spaceName, params.branch);
+				return withPreviewCorsHeaders(env, request, response);
+			}
+
+			// Handle Git protocol endpoints directly
+			// Route: /apps/:id.git/info/refs or /apps/:id.git/git-upload-pack
+			if (isGitProtocolRequest(pathname)) {
+				return handleGitProtocolRequest(request, env, ctx);
+			}
+			
+			// Cloudflare OAuth connect routes: handle via Hono app even though they are not under /api
+			if (pathname.startsWith('/oauth/') || pathname === '/auth/callback') {
+				// Do not log the full URL: /auth/callback carries sensitive
+				// query params (code, state) that must not end up in logs.
+				logger.info(`Handling Cloudflare OAuth request for: ${pathname}`);
+				const app = createApp(env);
+				return app.fetch(request, env, ctx);
+			}
+			
+			// Serve static assets for all other non-API routes from the ASSETS binding.
+			if (!pathname.startsWith('/api/')) {
+				return env.ASSETS.fetch(request);
+			}
+			// AI Gateway proxy for generated apps
+			if (pathname.startsWith('/api/proxy/openai')) {
+                // Browser-originated requests must come from a preview-domain
+                // subdomain or an explicitly allowed origin. Server-side calls
+                // from generated apps carry no Origin header and are allowed
+                // through (auth is enforced by the app-proxy JWT downstream).
+                const origin = request.headers.get('Origin');
+                if (origin) {
+                    const previewDomain = getPreviewDomain(env);
+                    const originAllowed = isOriginAllowed(env, origin) || origin.endsWith(`.${previewDomain}`);
+                    if (!originAllowed) {
+                        logger.warn(`Access denied. Invalid origin: ${origin}, preview domain: ${previewDomain}`);
+                        return new Response('Access denied. Invalid origin.', { status: 403 });
+                    }
+                }
+                return proxyToAiGateway(request, env, ctx);
+			}
+
+			// Handle all API requests with the main Hono application.
+			// Log pathname only: some API routes (e.g. /api/auth/callback/:provider)
+			// carry sensitive query params like `code`/`state`.
+			logger.info(`Handling API request for: ${pathname}`);
+			const app = createApp(env);
+			return app.fetch(request, env, ctx);
+		}
+
+		// Route 2: User App Request (e.g., xyz.build.cloudflare.dev or test.localhost)
+		if (isSubdomainRequest) {
+			return handleUserAppRequest(request, env);
+		}
+
+		return new Response('Not Found', { status: 404 });
+	},
+} satisfies ExportedHandler<Env>;
+
+export default worker;
+
+// Wrap the entire worker with Sentry for comprehensive error monitoring.
+// export default Sentry.withSentry(sentryOptions, worker);

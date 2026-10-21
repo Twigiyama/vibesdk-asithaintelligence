@@ -1,0 +1,537 @@
+@source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import '@cloudflare/kumo/styles/tailwind';
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:where([data-mode=dark], [data-mode=dark] *));
+@plugin '@tailwindcss/typography';
+
+@font-face {
+	font-family: 'Departure Mono';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src:
+		url('/fonts/DepartureMono-Regular.woff2') format('woff2'),
+		url('/fonts/DepartureMono-Regular.woff') format('woff');
+}
+
+@theme inline {
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) + 4px);
+	--color-destructive: var(--destructive);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+
+	--color-bg-1: var(--build-chat-colors-bg-1);
+	--color-bg-2: var(--build-chat-colors-bg-2);
+	--color-bg-3: var(--build-chat-colors-bg-3);
+	--color-bg-4: var(--build-chat-colors-bg-4);
+	--color-border-primary: var(--build-chat-colors-border-primary);
+	--color-border-secondary: var(--build-chat-colors-border-secondary);
+	--color-border-tertiary: var(--build-chat-colors-border-tertiary);
+	--color-danger: var(--build-chat-colors-danger);
+	--color-brand-primary: var(--build-chat-colors-brand-primary);
+	--color-brand-light: var(--build-chat-colors-brand-light);
+	--color-text-inverted: var(--build-chat-colors-text-inverted);
+	--color-text-primary: var(--build-chat-colors-text-primary);
+	--color-text-secondary: var(--build-chat-colors-text-secondary);
+	--color-text-tertiary: var(--build-chat-colors-text-tertiary);
+
+	--animate-typing-dot: typing-dot 1.2s ease-in-out infinite;
+	--animate-shake: shake 1s ease-in-out;
+}
+
+@theme {
+	--font-sans:
+		'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+		'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+	--font-funky-mono: 'Departure Mono', var(--font-mono);
+
+	--color-brand: #ff3d00;
+	--color-text: #000;
+}
+
+@layer base {
+	:root {
+		--radius: 0.625rem;
+		--destructive: oklch(0.577 0.245 27.325);
+		--border: oklch(0.922 0 0);
+		--input: oklch(0.922 0 0);
+		--ring: oklch(0.708 0 0);
+		--build-chat-colors-bg-1: #e7e7e7;
+		--build-chat-colors-bg-2: #f6f6f6;
+		--build-chat-colors-bg-3: #fbfbfc;
+		--build-chat-colors-bg-4: #ffffff;
+		--build-chat-colors-border-primary: #e5e5e5;
+		--build-chat-colors-border-secondary: #eeeeee;
+		--build-chat-colors-border-tertiary: #eeeeee;
+		--build-chat-colors-danger: #950000cc;
+		--build-chat-colors-brand-primary: #f6821f;
+		--build-chat-colors-brand-light: #faae42;
+		--build-chat-colors-text-inverted: #ffffff;
+		--build-chat-colors-text-primary: #0a0a0a;
+		--build-chat-colors-text-secondary: #171717;
+		--build-chat-colors-text-tertiary: #21212199;
+	}
+
+	[data-mode='dark'] {
+		--destructive: #ef4444; /* Error red */
+		--border: #393939; /* Primary border color */
+		--input: #292929; /* Input background */
+
+		--build-chat-colors-bg-1: #151515;
+		--build-chat-colors-bg-2: #1f2020;
+		--build-chat-colors-bg-3: #292929;
+		--build-chat-colors-bg-4: #3c3c3c;
+		--build-chat-colors-border-primary: #393939;
+		--build-chat-colors-border-secondary: #454746;
+		--build-chat-colors-border-tertiary: #454746;
+		--build-chat-colors-brand-primary: #f6821f;
+		--build-chat-colors-brand-light: #faae42;
+		--build-chat-colors-text-inverted: #000000;
+		--build-chat-colors-text-primary: #ffffff;
+		--build-chat-colors-text-secondary: #cdcaca;
+		--build-chat-colors-text-tertiary: #bcb9b9;
+	}
+
+	* {
+		@apply border-kumo-line outline-ring/50;
+	}
+
+	html,
+	body,
+	#root {
+		height: 100%;
+	}
+
+	body {
+		@apply bg-kumo-base text-kumo-default;
+	}
+
+	button {
+		@apply cursor-pointer;
+	}
+
+	select {
+		@apply cursor-pointer;
+	}
+}
+
+.vibesdk-sidebar-wrapper {
+	height: 100svh;
+	--sidebar-width: 320px !important;
+	--sidebar-width-icon: 52px !important;
+}
+
+@media (max-width: 767px) {
+	.vibesdk-sidebar-wrapper {
+		--sidebar-width: 18rem !important;
+	}
+}
+
+/* Subtle chat edge throb effect */
+@keyframes chat-edge-throb {
+	0%,
+	100% {
+		box-shadow:
+			0 0 0 0 rgba(246, 130, 31, 0.1),
+			inset 0 0 0 1px rgba(246, 130, 31, 0.16);
+	}
+	50% {
+		box-shadow:
+			0 0 0 6px rgba(255, 61, 0, 0.08),
+			inset 0 0 0 2px rgba(255, 61, 0, 0.22);
+	}
+}
+
+.chat-edge-throb {
+	animation: chat-edge-throb 1.6s ease-in-out infinite;
+	border-radius: 0.75rem; /* rounded-xl */
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-edge-throb {
+		animation: none;
+	}
+}
+
+/* Debug mode pulsing effect - red edges */
+@keyframes debug-pulse {
+	0%,
+	100% {
+		box-shadow:
+			inset 4px 0 12px rgba(239, 68, 68, 0.1),
+			inset -4px 0 12px rgba(239, 68, 68, 0.1);
+	}
+	50% {
+		box-shadow:
+			inset 4px 0 20px rgba(239, 68, 68, 0.2),
+			inset -4px 0 20px rgba(239, 68, 68, 0.2);
+	}
+}
+
+.animate-debug-pulse {
+	animation: debug-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.animate-debug-pulse {
+		animation: none;
+	}
+}
+
+/* Scattered icon wallpaper for empty preview state */
+@keyframes run-app-icon-float {
+	0%,
+	100% {
+		transform: translateY(0) rotate(var(--rot, 0deg));
+	}
+	50% {
+		transform: translateY(var(--bob, -6px)) rotate(var(--rot, 0deg));
+	}
+}
+
+.run-app-icons {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	pointer-events: none;
+}
+
+.run-app-icons > span {
+	position: absolute;
+	display: flex;
+	color: var(--icon-color, var(--color-brand, #f6821f));
+	opacity: var(--op, 0.22);
+	animation: run-app-icon-float var(--dur, 7s) ease-in-out infinite;
+	animation-delay: var(--delay, 0s);
+	will-change: transform;
+}
+
+.run-app-icons > span svg {
+	width: 1em;
+	height: 1em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.run-app-icons > span {
+		animation: none;
+		transform: rotate(var(--rot, 0deg));
+	}
+}
+
+/* Home: spotlight centered on the prompt hero */
+.home-atmosphere {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	pointer-events: none;
+	z-index: 0;
+}
+
+.home-atmosphere__spotlight {
+	position: absolute;
+	inset: 0;
+	background:
+		/* Warm brand core behind headline + prompt */
+		radial-gradient(
+			ellipse 42% 34% at 50% 28%,
+			rgba(246, 130, 31, 0.18) 0%,
+			rgba(246, 130, 31, 0.08) 32%,
+			transparent 68%
+		),
+		/* Soft cool rim so the stage reads as lit, not flat orange */
+		radial-gradient(
+				ellipse 58% 46% at 50% 30%,
+				rgba(255, 255, 255, 0.06) 0%,
+				transparent 62%
+			),
+		/* Falloff — rest of page stays quiet */
+		radial-gradient(
+				ellipse 90% 75% at 50% 34%,
+				transparent 40%,
+				rgba(0, 0, 0, 0.35) 100%
+			);
+}
+
+:root:not([data-mode='dark']) .home-atmosphere__spotlight {
+	background:
+		radial-gradient(
+			ellipse 42% 34% at 50% 28%,
+			rgba(246, 130, 31, 0.14) 0%,
+			rgba(246, 130, 31, 0.05) 32%,
+			transparent 68%
+		),
+		radial-gradient(
+			ellipse 58% 46% at 50% 30%,
+			rgba(255, 255, 255, 0.55) 0%,
+			transparent 62%
+		),
+		radial-gradient(
+			ellipse 90% 75% at 50% 34%,
+			transparent 42%,
+			rgba(0, 0, 0, 0.06) 100%
+		);
+}
+
+/* Custom scrollbar for debug bubble */
+.custom-scrollbar::-webkit-scrollbar {
+	width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+	background: rgba(0, 0, 0, 0.05);
+	border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+	background: rgba(239, 68, 68, 0.3);
+	border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+	background: rgba(239, 68, 68, 0.5);
+}
+
+[data-mode='dark'] .custom-scrollbar::-webkit-scrollbar-track {
+	background: rgba(255, 255, 255, 0.05);
+}
+
+[data-mode='dark'] .custom-scrollbar::-webkit-scrollbar-thumb {
+	background: rgba(239, 68, 68, 0.4);
+}
+
+[data-mode='dark'] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+	background: rgba(239, 68, 68, 0.6);
+}
+
+/* Hack from https://stackoverflow.com/a/71876526 */
+.monaco-editor {
+	position: absolute !important;
+}
+
+@keyframes spin-border {
+	from {
+		--spin-angle: 0deg;
+	}
+	to {
+		--spin-angle: 360deg;
+	}
+}
+
+@utility animated-border-ring {
+	position: relative;
+
+	&::before {
+		content: '';
+		position: absolute;
+		inset: -2px;
+		border-radius: 9999px;
+		padding: 1.5px;
+		background: conic-gradient(
+			from var(--spin-angle, 0deg),
+			transparent 30%,
+			var(--color-brand) 100%
+		);
+		mask:
+			linear-gradient(#fff 0 0) content-box,
+			linear-gradient(#fff 0 0);
+		mask-composite: exclude;
+		animation: spin-border 1.5s linear infinite;
+	}
+}
+
+/* Mirrors OrangeButton / Kumo primary emphasis gradient on text fill. */
+@utility text-brand-emphasis {
+	background-image: linear-gradient(
+		to bottom,
+		color-mix(in oklch, var(--color-brand), white 15%),
+		var(--color-brand)
+	);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+}
+
+@property --spin-angle {
+	syntax: '<angle>';
+	initial-value: 0deg;
+	inherits: false;
+}
+
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+	background-color: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background-color: rgba(0, 0, 0, 0.2);
+	border-radius: 4px;
+	transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background-color: rgba(0, 0, 0, 0.3);
+}
+
+[data-mode='dark'] ::-webkit-scrollbar-thumb {
+	background-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-mode='dark'] ::-webkit-scrollbar-thumb:hover {
+	background-color: rgba(255, 255, 255, 0.3);
+}
+
+::-webkit-scrollbar-corner {
+	background-color: transparent;
+}
+
+/* Phase Timeline Custom Scrollbar */
+.phase-timeline-scroll::-webkit-scrollbar {
+	width: 6px;
+}
+
+.phase-timeline-scroll::-webkit-scrollbar-track {
+	background: rgba(0, 0, 0, 0.05);
+	border-radius: 3px;
+}
+
+.phase-timeline-scroll::-webkit-scrollbar-thumb {
+	background: rgba(0, 0, 0, 0.2);
+	border-radius: 3px;
+}
+
+.phase-timeline-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(0, 0, 0, 0.3);
+}
+
+[data-mode='dark'] .phase-timeline-scroll::-webkit-scrollbar-track {
+	background: rgba(255, 255, 255, 0.05);
+}
+
+[data-mode='dark'] .phase-timeline-scroll::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.2);
+}
+
+[data-mode='dark'] .phase-timeline-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.3);
+}
+
+.presentation-thumbnail-bg {
+	background:
+		radial-gradient(
+			circle at 20% 80%,
+			rgba(99, 102, 241, 0.15) 0%,
+			transparent 50%
+		),
+		radial-gradient(
+			circle at 80% 20%,
+			rgba(139, 92, 246, 0.15) 0%,
+			transparent 50%
+		),
+		radial-gradient(
+			circle at 40% 40%,
+			rgba(59, 130, 246, 0.1) 0%,
+			transparent 40%
+		),
+		linear-gradient(
+			135deg,
+			#0a0e1a 0%,
+			#0f172a 25%,
+			#1e293b 50%,
+			#0f172a 75%,
+			#0a0e1a 100%
+		);
+	background-size:
+		100% 100%,
+		100% 100%,
+		100% 100%,
+		400% 400%;
+}
+
+.a-tag a {
+	@apply text-kumo-brand;
+}
+
+.prose {
+	/* --tw-prose-invert-counters: rgb(156, 187, 192); */
+	/* --tw-prose-invert-bullets: rgb(156, 187, 192); */
+	--tw-prose-th-headers: --value(var(--color-text));
+	--tw-prose-body: --value(var(--color-text));
+	--tw-prose-headings: --value(var(--color-text));
+	--tw-prose-code: --value(var(--color-text));
+	--tw-prose-bold: --value(var(--color-text));
+	--tw-prose-quotes: --value(var(--color-text));
+	--tw-prose-counters: --value(var(--color-text));
+}
+
+/* Chat messages custom scrollbar */
+.chat-messages-scroll::-webkit-scrollbar {
+	width: 8px;
+}
+
+.chat-messages-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.chat-messages-scroll::-webkit-scrollbar-thumb {
+	background: rgba(0, 0, 0, 0.1);
+	border-radius: 4px;
+}
+
+.chat-messages-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(0, 0, 0, 0.15);
+}
+
+[data-mode='dark'] .chat-messages-scroll::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.15);
+}
+
+[data-mode='dark'] .chat-messages-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.2);
+}
+
+/* Terminal custom scrollbar */
+.terminal-scroll::-webkit-scrollbar {
+	width: 8px;
+}
+
+.terminal-scroll::-webkit-scrollbar-track {
+	background: rgba(0, 0, 0, 0.05);
+	border-radius: 4px;
+}
+
+.terminal-scroll::-webkit-scrollbar-thumb {
+	background: rgba(0, 0, 0, 0.15);
+	border-radius: 4px;
+	transition: background-color 0.2s ease;
+}
+
+.terminal-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(0, 0, 0, 0.25);
+}
+
+[data-mode='dark'] .terminal-scroll::-webkit-scrollbar-track {
+	background: rgba(255, 255, 255, 0.05);
+}
+
+[data-mode='dark'] .terminal-scroll::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.15);
+}
+
+[data-mode='dark'] .terminal-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.25);
+}
+
+/* Hide scrollbar but keep scroll behavior */
+.no-scrollbar {
+	-ms-overflow-style: none; /* IE and Edge */
+	scrollbar-width: none; /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+	display: none; /* Chrome, Safari, Opera */
+}

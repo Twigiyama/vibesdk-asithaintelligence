@@ -1,0 +1,34 @@
+{
+	"name": "vibesdk-test",
+	"compatibility_date": "2024-12-12",
+	"main": "worker/index.ts",
+	"compatibility_flags": ["nodejs_compat"],
+	"send_metrics": false,
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "UserSecretsStore",
+				"name": "UserSecretsStore"
+			},
+			{
+				"class_name": "FsHarnessDO",
+				"name": "FsHarnessDO"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"new_sqlite_classes": [
+				"UserSecretsStore"
+			],
+			"tag": "v1"
+		},
+		{
+			"new_sqlite_classes": [
+				"FsHarnessDO"
+			],
+			"tag": "v2"
+		}
+	],
+	"vars": {}
+}

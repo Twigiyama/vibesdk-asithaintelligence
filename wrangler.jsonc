@@ -1,0 +1,246 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+ {
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "vibesdk-asithaintelligence",
+	"main": "worker/index.ts",
+	// Resolve the vendored artifacts-viewer server entrypoints for the Worker
+	// bundle. `wrangler deploy` uses esbuild (not Vite), so it does not read
+	// vite.config.ts aliases; these mirror them for the two server-only
+	// specifiers the Worker imports (the React/client/styles subpaths are
+	// frontend-only and resolved by Vite).
+	"alias": {
+		"artifacts-viewer": "./packages/artifacts-viewer/packages/artifacts-viewer/src/index.ts",
+		"artifacts-viewer/server/cache": "./packages/artifacts-viewer/packages/artifacts-viewer/src/server/cache-adapters.ts"
+	},
+	// Facets (durable-object-facets) require a recent compat date — bumped
+	// from 2025-08-10 to enable `ctx.facets.get()` for space-generated
+	// apps' env.DB binding.
+	"compatibility_date": "2026-05-23",
+	"compatibility_flags": ["nodejs_compat"],
+	// Preserve dashboard-managed vars on deploy so dashboard-only settings
+	// (e.g. ENABLE_ARTIFACTS and ENABLE_READ_REPLICAS) are not deleted by `wrangler deploy`.
+	"keep_vars": true,
+	// Treat imported `.md` files (e.g. Think agent SKILL.md) as Text modules so
+	// `wrangler deploy` can bundle markdown imports. Unlike `.txt`, `.md` has no
+	// built-in esbuild loader. The `?raw` glob is required because wrangler's
+	// module-collection `onResolve` filter matches the raw import specifier
+	// (which ends in `?raw`) before the query string is stripped.
+	"rules": [
+		{ "type": "Text", "globs": ["**/*.md", "**/*.md?raw"], "fallthrough": true }
+	],
+    "version_metadata": {
+        "binding": "CF_VERSION_METADATA"
+    },
+	"assets": {
+		"directory": "dist/client",
+		"not_found_handling": "single-page-application",
+		// "run_worker_first": ["!/src/*", "!/api/docs/*"],
+        "run_worker_first": true,
+        "binding": "ASSETS"
+	},
+	"observability": {
+		"enabled": true,
+        "head_sampling_rate": 1,
+		"logs": {
+			"enabled": true,
+			"invocation_logs": true
+		},
+		"traces": {
+			"enabled": true
+		}
+	},
+    "unsafe": {
+        "bindings": [
+            {
+                "name": "API_RATE_LIMITER",
+                "type": "ratelimit",
+                "namespace_id": "2101",
+                "simple": { "limit": 10000, "period": 60 }
+            },
+            {
+                "name": "AUTH_RATE_LIMITER",
+                "type": "ratelimit",
+                "namespace_id": "2102",
+                "simple": { "limit": 1000, "period": 60 }
+            }
+        ]
+    },
+	/**
+	 * Bindings
+	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+	 * databases, object storage, AI inference, real-time communication and more.
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	"ai": {
+		"binding": "AI",
+        "remote": true
+	},
+	"browser": {
+		"binding": "BROWSER",
+		"remote": true
+	},
+    "dispatch_namespaces": [
+        {
+            "binding": "DISPATCHER",
+            "namespace": "vibesdk-default-namespace",
+            "remote": true
+        }
+    ],
+    "artifacts": [
+        {
+            "binding": "ARTIFACTS",
+            "namespace": "vibesdk-production"
+        }
+    ],
+	"containers": [
+		{
+			"class_name": "UserAppSandboxService",
+			"image": "./SandboxDockerfile",
+            // "image": "registry.cloudflare.com/vibesdk-production-userappsandboxservice:cfe197fc",
+            // Altering max_instances value will have no effect. Please use the MAX_SANDBOX_INSTANCES var instead.
+			"max_instances": 1400,
+            // ATTENTION: Altering instance_type value will have no effect. Please use the SANDBOX_INSTANCE_TYPE var instead.
+            "instance_type": {
+                "vcpu": 4,
+                "memory_mib": 8192,
+                "disk_mb": 10240
+            },
+            "rollout_step_percentage": 100,
+			"ssh": {
+				"enabled": true
+			}
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "vibesdk-db",
+			"database_id": "e1a508b4-3e11-4db4-83f3-004b562a83f3",
+			"migrations_dir": "migrations"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "CodeGeneratorAgent",
+				"name": "CodeGenObject"
+			},
+            {
+                "class_name": "UserAppSandboxService",
+                "name": "Sandbox"
+            },
+            {
+                "class_name": "DORateLimitStore",
+                "name": "DORateLimitStore"
+            },
+            {
+                "class_name": "UserSecretsStore",
+                "name": "UserSecretsStore"
+            },
+            {
+                "class_name": "ThinkAgent",
+                "name": "THINK_DO"
+            },
+            {
+                "class_name": "SpaceDO",
+                "name": "SPACE_DO"
+            }
+		]
+	},
+    "worker_loaders": [
+        {
+            "binding": "LOADER"
+        }
+    ],
+    "r2_buckets": [
+      {
+        "binding": "TEMPLATES_BUCKET",
+        "bucket_name": "vibesdk-templates","preview_bucket_name": "vibesdk-templates"
+      }
+    ],
+    "kv_namespaces": [
+        {
+            "binding": "VibecoderStore",
+            "id": "d2f2360aab6a408698c7c84591c2b5b4"
+        }
+    ],
+    // "placement": {
+    //   "mode": "smart"
+    // },
+	"migrations": [
+		{
+			"new_sqlite_classes": [
+				"CodeGeneratorAgent",
+				"UserAppSandboxService"
+			],
+			"tag": "v1"
+		},
+        {
+            "new_sqlite_classes": [
+                "DORateLimitStore"
+            ],
+            "tag": "v2"
+        },
+        {
+            "new_sqlite_classes": [
+                "UserSecretsStore"
+            ],
+            "tag": "v3"
+        },
+        {
+            "new_sqlite_classes": [
+                "SpaceDO"
+            ],
+            "tag": "v5"
+        },
+        {
+            "new_sqlite_classes": [
+                "ThinkAgent"
+            ],
+            "tag": "v6"
+        }
+	],
+	"routes": [
+        {
+            "pattern": "build.cloudflare.dev",
+            "custom_domain": true
+        },
+        {
+            "pattern": "*build-preview.cloudflare.dev/*",
+            "custom_domain": false,
+            "zone_id": "db01fac4261b2604aacad8410443a3e2"
+        }
+    ],
+	"vars": {
+        "TEMPLATES_REPOSITORY": "https://github.com/cloudflare/vibesdk-templates",
+        "DISPATCH_NAMESPACE": "vibesdk-default-namespace",
+        "CLOUDFLARE_AI_GATEWAY": "vibesdk-gateway",
+        // Cloudflare Artifacts namespace for the read-only Repo viewer proxy.
+        // Must match the `artifacts` binding namespace above.
+        "ARTIFACTS_NAMESPACE": "vibesdk-production",
+        "PLATFORM_CAPABILITIES": {
+            "features": {
+                "app": {
+                    "enabled": true
+                },
+                "presentation": {
+                    "enabled": false
+                },
+                "general": {
+                    "enabled": false
+                }
+            },
+            "version": "1.0.0"
+        },
+        "CUSTOM_DOMAIN": "asithaintelligence.com",
+        "MAX_SANDBOX_INSTANCES": "10",
+        "SANDBOX_INSTANCE_TYPE": "standard-3",
+        "DEV_BROWSER_SIDECAR_URL": "http://127.0.0.1:9223",
+        "DEV_BROWSER_PREVIEW_ORIGIN": "http://localhost:5173"
+    },
+	"workers_dev": false,
+	"preview_urls": false
+}
