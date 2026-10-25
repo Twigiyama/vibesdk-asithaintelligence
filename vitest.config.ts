@@ -28,6 +28,10 @@ export default defineWorkersConfig({
     },
     poolOptions: {
       workers: {
+        // One shared runtime for every test file. A runtime per file loads each
+        // module over a fresh loopback connection, which exhausts the macOS
+        // ephemeral port range (EADDRNOTAVAIL) partway through a full run.
+        singleWorker: true,
         main: './test/worker-entry.ts',
         wrangler: { configPath: './wrangler.test.jsonc' },
         miniflare: {
