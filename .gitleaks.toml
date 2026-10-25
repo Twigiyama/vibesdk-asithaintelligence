@@ -1,0 +1,16 @@
+title = "vibesdk gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Truncated sample JWT in the SDK README"
+condition = "AND"
+paths = ['''sdk/README\.md''']
+regexes = ['''^eyJhbGciOiJIUzI1NiIs''']
+
+[[allowlists]]
+description = "Fixed 16-character token in a sandbox request-handler unit test"
+condition = "AND"
+paths = ['''worker/services/sandbox/request-handler\.test\.ts''']
+regexes = ['''^abcdef0123456789$''']
