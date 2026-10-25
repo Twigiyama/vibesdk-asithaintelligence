@@ -62,8 +62,10 @@ jobs:
         continue-on-error: true
         run: bun run knip
 
+      # Dependabot titles start with a capital "Bump", which the subject-case rule
+      # rejects; their type and scope are fixed by dependabot.yml.
       - name: Pull request title
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: printf '%s\n' "$PR_TITLE" | bunx commitlint
