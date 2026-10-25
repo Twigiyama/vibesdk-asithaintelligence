@@ -7,6 +7,7 @@
 - [ ] No D1 migration in this PR, or every new migration is additive and the release that is currently deployed keeps working against the new schema (migrations run before the code deploys).
 - [ ] Destructive statements (`DROP`, `RENAME`, `DELETE FROM`) carry the `destructive-migration` label, with the restore plan below.
 - [ ] No applied migration was edited, renamed or deleted.
+- [ ] New columns are nullable or have a default, and new unique indexes cannot reject inserts that the running release makes. The migration guard only catches destructive statements.
 
 ## Durable Objects and bindings
 

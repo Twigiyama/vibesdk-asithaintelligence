@@ -146,6 +146,25 @@ describe('verifyWranglerConfig', () => {
 			expect(rules(config)).toContain('foreign-host');
 		});
 
+		it('flags the singular route key, which wrangler also accepts', () => {
+			const config = { ...valid(), route: 'build.cloudflare.dev/*' };
+
+			const found = verifyWranglerConfig(config, expected).find((f) => f.rule === 'foreign-host');
+
+			expect(found?.message).toContain('route');
+		});
+
+		it('flags a forbidden suffix inside a named environment', () => {
+			const config = {
+				...valid(),
+				env: { production: { routes: [{ pattern: 'app.cloudflare.dev', custom_domain: true }] } },
+			};
+
+			const found = verifyWranglerConfig(config, expected).find((f) => f.rule === 'foreign-host');
+
+			expect(found?.message).toContain('env.production.routes[0].pattern');
+		});
+
 		it('flags a forbidden suffix in a string route', () => {
 			expect(rules({ ...valid(), routes: ['*.cloudflare.dev/*'] })).toContain('foreign-host');
 		});

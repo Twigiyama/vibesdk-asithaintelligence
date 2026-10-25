@@ -8,11 +8,13 @@ on:
 permissions:
   contents: read
 
-# A pull request keeps only its newest run. Runs started by workflow_call get
-# their own group, so a deploy never cancels or queues behind another.
+# A new commit cancels the run in flight for its pull request. Editing the title,
+# description or labels does not: it queues one more run for the same commit.
+# Runs started by workflow_call get their own group, so a deploy never cancels
+# or queues behind another.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
 
 env:
   HUSKY: '0'
@@ -93,6 +95,10 @@ jobs:
         if: steps.config-guard.outputs.findings == '0'
         run: bunx wrangler deploy --dry-run
 
+      - name: Note the skipped dry run
+        if: steps.config-guard.outputs.findings != '0'
+        run: echo "::notice title=Wrangler dry run skipped::The config guard has findings, so the container image is not yet pinned to a registry reference. See docs/ci-cd.md."
+
   sdk:
     name: sdk
     runs-on: ubuntu-24.04
@@ -122,7 +128,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-toolchain
+      # Bun and the lockfile are all `bun audit` needs; nothing here runs the
+      # project's code or lifecycle scripts.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
 
       # The checksum is pinned together with the version. Dependabot cannot
       # update it: change both when bumping gitleaks.
@@ -146,9 +156,11 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: gitleaks git --redact --no-banner --log-opts="${BASE_SHA}..${HEAD_SHA}"
 
-      - name: Scan for secrets in history
+      # Pull requests are scanned commit by commit above; a deploy scans the files
+      # it ships, so a historical finding cannot hold a release hostage.
+      - name: Scan the checked-out files for secrets
         if: github.event_name != 'pull_request'
-        run: gitleaks git --redact --no-banner
+        run: gitleaks dir --redact --no-banner .
 
       # 168 advisories at adoption. Make it blocking by removing
       # continue-on-error once `bun audit --audit-level high` is clean.

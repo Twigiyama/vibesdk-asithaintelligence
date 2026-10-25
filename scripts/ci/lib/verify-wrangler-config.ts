@@ -139,7 +139,7 @@ function* walkStrings(
 		}
 	} else if (typeof value === 'object' && value !== null) {
 		for (const [key, item] of Object.entries(value)) {
-			yield* walkStrings(item, `${path}.${key}`);
+			yield* walkStrings(item, path === '' ? key : `${path}.${key}`);
 		}
 	}
 }
@@ -166,12 +166,9 @@ function checkForeignHosts(config: WranglerConfig, expected: DeployConfig) {
 	}));
 	if (patterns.length === 0) return [];
 
-	const candidates = [
-		...walkStrings(config.routes ?? [], 'routes'),
-		...walkStrings(config.vars ?? {}, 'vars'),
-	];
-
-	return candidates.flatMap(({ path, value }) =>
+	// Every string in the config: besides routes and vars, wrangler accepts a
+	// singular `route` and per-environment copies of both under `env`.
+	return [...walkStrings(config, '')].flatMap(({ path, value }) =>
 		patterns
 			.filter(({ regex }) => regex.test(value.toLowerCase()))
 			.map(({ suffix }) =>

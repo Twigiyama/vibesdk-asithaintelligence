@@ -21,7 +21,7 @@ How changes are checked before they reach `main`. The release flow is: short-liv
 | | `bun audit --audit-level high` | No (report only) |
 | `gate` | Succeeds only when all four jobs succeeded | The only required check |
 
-Every job has a 15-minute timeout and read-only repository permissions. The pull request title is the squash commit subject, so it is linted. PR titles and branch names reach scripts through `env:`, never interpolated into `run:`.
+Every job has a 15-minute timeout and read-only repository permissions. The pull request title is the squash commit subject, so it is linted again whenever it is edited. A new commit cancels the run in flight; editing the title, description or labels instead queues one more run for the same commit, because a run that skipped its checks could otherwise turn a failed commit green. PR titles and branch names reach scripts through `env:`, never interpolated into `run:`.
 
 Run the blocking checks locally with `bun run verify` (see [development.md](development.md)).
 
@@ -69,6 +69,8 @@ D1 migrations are applied before the new code deploys, so each new migration has
 
 The historical migrations, including both `0006_*` files, contain such statements and are never rescanned.
 
+The guard catches the common ways a migration breaks the release still serving traffic; it cannot prove a migration is compatible. Review the additive ones too: a new `NOT NULL` column needs a default (SQLite refuses one without, so that fails loudly), and a new unique index must not reject inserts the running release makes.
+
 ### Wrangler config guard
 
 `bun scripts/ci/verify-wrangler-config.ts <config>... [--expect <file>] [--enforce]`
@@ -98,7 +100,7 @@ Values omitted from `.github/deploy.config.json` are not compared. `"artifactsNa
 
 ## Repository settings
 
-`scripts/ops/configure-github.sh` holds the intended settings as code. Without arguments it only reads and reports drift; `--apply` writes. It never reads or writes secret values.
+`scripts/ops/configure-github.sh` holds the intended settings as code. Without arguments it only reads and reports drift; `--apply` writes. It never reads or writes secret values. Drift means any difference in what the script manages, in either direction: a ruleset that is looser than intended (another merge method, required check or bypass actor) is reported, while fields GitHub adds on its own are ignored. Applying the environment keeps the reviewers and wait timer already set on it.
 
 | Setting | Value |
 | --- | --- |
