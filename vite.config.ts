@@ -29,6 +29,9 @@ export default defineConfig({
 		svgr(),
 		cloudflare({
 			configPath: 'wrangler.jsonc',
+			// Bindings marked `remote: true` (ai, browser, dispatch namespace) need
+			// Cloudflare auth; connect them only when explicitly requested.
+			remoteBindings: process.env.VIBESDK_REMOTE_BINDINGS === '1',
 		}),
 		tailwindcss(),
 		// sentryVitePlugin({
