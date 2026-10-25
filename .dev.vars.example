@@ -1,0 +1,71 @@
+# Local development variables for `bun run dev`.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# .dev.vars is gitignored. Never commit real values and never copy production
+# secrets here: deployed secrets never come from this file.
+#
+# Values here override the matching `vars` in wrangler.jsonc during local dev.
+
+# --- Environment -----------------------------------------------------------
+# "dev" relaxes CSP and HSTS, and skips the ratelimit bindings, which do not
+# run locally.
+ENVIRONMENT="dev"
+CUSTOM_DOMAIN="localhost:5173"
+
+# --- Required --------------------------------------------------------------
+# JWT signing key: at least 32 characters, at least three character classes
+# (lowercase, uppercase, digits, symbols) and no run of four identical
+# characters. Generate one with:
+#   openssl rand -base64 48
+JWT_SECRET=""
+
+# --- AI Gateway (needed for the agent to call models) ----------------------
+# The Think agent addresses the gateway as account + gateway name. The name
+# defaults to the CLOUDFLARE_AI_GATEWAY var in wrangler.jsonc; set it here only
+# to point local dev at a different gateway.
+#CLOUDFLARE_ACCOUNT_ID=""
+#CLOUDFLARE_AI_GATEWAY=""
+# Token for the gateway. Falls back to CLOUDFLARE_API_TOKEN when unset.
+#CLOUDFLARE_AI_GATEWAY_TOKEN=""
+# Legacy (agentic/phasic) agents use this URL directly instead of the AI
+# binding:
+#CLOUDFLARE_AI_GATEWAY_URL="https://gateway.ai.cloudflare.com/v1/<account-id>/<gateway-name>"
+
+# --- Cloudflare API access -------------------------------------------------
+# Needed to deploy user apps.
+#CLOUDFLARE_API_TOKEN=""
+
+# --- Provider keys (optional; leave unset to use the gateway's stored keys) -
+#ANTHROPIC_API_KEY=""
+#OPENAI_API_KEY=""
+#GOOGLE_AI_STUDIO_API_KEY=""
+#OPENROUTER_API_KEY=""
+#GROQ_API_KEY=""
+
+# --- OAuth (optional; email registration works without it) -----------------
+#GOOGLE_CLIENT_ID=""
+#GOOGLE_CLIENT_SECRET=""
+#GITHUB_CLIENT_ID=""
+#GITHUB_CLIENT_SECRET=""
+#GITHUB_EXPORTER_CLIENT_ID=""
+#GITHUB_EXPORTER_CLIENT_SECRET=""
+#CLOUDFLARE_OAUTH_CLIENT_ID=""
+#CLOUDFLARE_OAUTH_CLIENT_SECRET=""
+# Encrypts the AI Gateway token cookie. Generate with: openssl rand -base64 32
+#CF_OAUTH_ENCRYPTION_KEY=""
+
+# --- Feature toggles (dashboard-managed when deployed; see docs/setup.md) --
+#ENABLE_ARTIFACTS=""
+#ENABLE_READ_REPLICAS=""
+#ENABLE_EMAIL_AUTH=""
+#ENABLE_CLOUDFLARE_LIMITS=""
+#ENABLE_USER_ACCOUNT_DEPLOY=""
+#ALLOWED_EMAIL=""
+#USE_CLOUDFLARE_IMAGES=""
+
+# --- Other -----------------------------------------------------------------
+#SENTRY_DSN=""
+#AI_PROXY_JWT_SECRET=""
+#CUSTOM_PREVIEW_DOMAIN=""
+#PLATFORM_MODEL_PROVIDERS=""
