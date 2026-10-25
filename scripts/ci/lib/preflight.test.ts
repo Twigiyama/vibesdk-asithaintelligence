@@ -166,6 +166,37 @@ describe('compareBindings', () => {
 		]);
 	});
 
+	it('does not call a binding removed when the config declares it under a kind it does not model', () => {
+		const withQueue = parseWranglerConfig({
+			name: 'vibesdk-production',
+			queues: { producers: [{ binding: 'JOBS', queue: 'jobs' }] },
+			services: [{ binding: 'AUTH', service: 'auth-worker' }],
+			analytics_engine_datasets: [{ binding: 'EVENTS' }],
+		});
+		const live: LiveBinding[] = [
+			{ name: 'JOBS', type: 'queue', queue_name: 'jobs' },
+			{ name: 'AUTH', type: 'service', service: 'auth-worker' },
+			{ name: 'EVENTS', type: 'analytics_engine', dataset: 'events' },
+		];
+
+		expect(compareBindings(withQueue, live)).toEqual([]);
+	});
+
+	it('still flags a live binding no section of the config mentions', () => {
+		const withQueue = parseWranglerConfig({
+			name: 'vibesdk-production',
+			queues: { producers: [{ binding: 'JOBS', queue: 'jobs' }] },
+		});
+		const live: LiveBinding[] = [
+			{ name: 'JOBS', type: 'queue' },
+			{ name: 'FORGOTTEN', type: 'queue' },
+		];
+
+		expect(compareBindings(withQueue, live)).toEqual([
+			{ severity: 'error', rule: 'binding-removed', message: expect.stringContaining('FORGOTTEN') },
+		]);
+	});
+
 	it('reports a new committed binding as information', () => {
 		const live = liveBindings().filter((b) => b.name !== 'LOADER');
 

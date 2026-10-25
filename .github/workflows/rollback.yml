@@ -53,6 +53,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ./.github/actions/require-environment
+        with:
+          token-set: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          worker-name: ${{ vars.WORKER_NAME }}
+
       - uses: ./.github/actions/setup-toolchain
 
       - name: Current deployments

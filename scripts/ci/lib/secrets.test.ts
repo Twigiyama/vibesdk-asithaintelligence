@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planSecretSync, validateWorkerSecrets } from './secrets';
+import { planSecretSync, secretMaskCommands, validateWorkerSecrets } from './secrets';
 
 const STRONG_JWT = 'Zk8$mP2vQx9LwT4nBc7YhR1aSd6FgJ3e';
 
@@ -156,5 +156,51 @@ describe('planSecretSync', () => {
 		const plan = planSecretSync({ B: 'x', A: 'x' }, []);
 
 		expect(plan.create).toEqual(['A', 'B']);
+	});
+});
+
+describe('secretMaskCommands', () => {
+	it('registers each value of at least eight characters', () => {
+		expect(secretMaskCommands(['sk-test-12345678', 'another-value-1'])).toEqual([
+			'::add-mask::sk-test-12345678',
+			'::add-mask::another-value-1',
+		]);
+	});
+
+	it('registers every line of a multi-line value separately, never printing it whole', () => {
+		const pem = '-----BEGIN KEY-----\nline-one-of-the-key\nline-two-of-the-key\n-----END KEY-----';
+
+		const commands = secretMaskCommands([pem]);
+
+		expect(commands).toEqual([
+			'::add-mask::-----BEGIN KEY-----',
+			'::add-mask::line-one-of-the-key',
+			'::add-mask::line-two-of-the-key',
+			'::add-mask::-----END KEY-----',
+		]);
+		expect(commands.every((command) => !/[\r\n]/.test(command))).toBe(true);
+	});
+
+	it('skips values and lines too short to mask without hiding ordinary words', () => {
+		expect(secretMaskCommands(['true', 'dev', '12345', 'x\nlong-enough-line'])).toEqual([
+			'::add-mask::long-enough-line',
+		]);
+	});
+
+	it('handles Windows line endings and blank lines', () => {
+		expect(secretMaskCommands(['first-long-line\r\n\r\nsecond-long-line'])).toEqual([
+			'::add-mask::first-long-line',
+			'::add-mask::second-long-line',
+		]);
+	});
+
+	it('does not repeat a line that appears in more than one value', () => {
+		expect(secretMaskCommands(['shared-long-value', 'shared-long-value'])).toEqual([
+			'::add-mask::shared-long-value',
+		]);
+	});
+
+	it('escapes percent signs so the runner masks the real value', () => {
+		expect(secretMaskCommands(['abc%20def-ghi'])).toEqual(['::add-mask::abc%2520def-ghi']);
 	});
 });

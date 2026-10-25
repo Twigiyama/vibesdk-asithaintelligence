@@ -122,6 +122,40 @@ export function expectedBindings(config: WranglerConfig): ExpectedBinding[] {
 	return expected;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function collectBindingNames(value: unknown, into: Set<string>): void {
+	if (Array.isArray(value)) {
+		for (const item of value) collectBindingNames(item, into);
+		return;
+	}
+	if (!isRecord(value)) return;
+
+	if (typeof value.binding === 'string') into.add(value.binding);
+	if (Array.isArray(value.bindings)) {
+		for (const entry of value.bindings) {
+			if (isRecord(entry) && typeof entry.name === 'string') into.add(entry.name);
+		}
+	}
+	for (const [key, child] of Object.entries(value)) {
+		if (key !== 'vars') collectBindingNames(child, into);
+	}
+}
+
+/**
+ * Every binding name the config declares, under any section. expectedBindings
+ * models the kinds this app uses; this catches the rest (queues, services,
+ * analytics datasets and so on) so a kind that is not modelled is never reported
+ * as a binding the deploy would remove.
+ */
+export function declaredBindingNames(config: WranglerConfig): Set<string> {
+	const names = new Set<string>();
+	collectBindingNames(config, names);
+	return names;
+}
+
 export function committedVarNames(config: WranglerConfig): string[] {
 	return Object.keys(config.vars ?? {});
 }
@@ -167,9 +201,9 @@ export function compareBindings(
 		}
 	}
 
-	const expectedNames = new Set(expected.map((binding) => binding.name));
+	const declaredNames = declaredBindingNames(config);
 	for (const binding of live) {
-		if (NON_RESOURCE_TYPES.has(binding.type) || expectedNames.has(binding.name)) continue;
+		if (NON_RESOURCE_TYPES.has(binding.type) || declaredNames.has(binding.name)) continue;
 		findings.push(
 			finding(
 				'error',

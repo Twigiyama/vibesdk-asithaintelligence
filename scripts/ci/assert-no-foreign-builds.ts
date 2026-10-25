@@ -17,6 +17,7 @@ import { fail } from './support';
 const BLOCKED_APPS = ['cloudflare-workers-and-pages'];
 
 const checkRunsSchema = z.looseObject({
+	total_count: z.number(),
 	check_runs: z.array(
 		z.looseObject({
 			name: z.string(),
@@ -48,13 +49,16 @@ try {
 	);
 	if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status} for the check runs of ${values.sha}.`);
 
-	const { check_runs: checkRuns } = checkRunsSchema.parse(await response.json());
+	const { total_count: total, check_runs: checkRuns } = checkRunsSchema.parse(await response.json());
+	if (total > checkRuns.length) {
+		throw new Error(`${values.sha} has ${total} check runs; only the first ${checkRuns.length} can be inspected.`);
+	}
 	const blocking = findBlockingCheckRuns(checkRuns, BLOCKED_APPS);
 
 	if (blocking.length > 0) {
 		for (const run of blocking) console.error(`Found check run "${run.name}" from ${run.app?.slug}.`);
 		throw new Error(
-			'Cloudflare Workers Builds is still attached to this repository and is building this commit. Disconnect it (Worker, Settings, Builds) before deploying from GitHub Actions.',
+			'Cloudflare Workers Builds has built this commit. If it is still attached, disconnect it (Worker, Settings, Builds) before deploying from GitHub Actions. If you already disconnected it, a commit pushed earlier keeps its check run: deploy a commit pushed after the disconnect, or use rollback.yml to return to an older version.',
 		);
 	}
 

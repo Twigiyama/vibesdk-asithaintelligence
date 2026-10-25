@@ -70,7 +70,9 @@ gh workflow run deploy.yml -f ref=main
 | `skip_migrations` | Do not apply D1 migrations. Only for migrations that were applied by hand. |
 | `allow_missing_worker` | Allow the first deploy of a Worker that does not exist yet. |
 
-Runs share one concurrency group (`deploy-production`) with `sync-secrets` and `rollback`, and are never cancelled midway.
+Runs share one concurrency group (`deploy-production`) with `sync-secrets` and `rollback`, and are never cancelled midway. GitHub keeps one waiting run per group: if one run is active and one is already waiting, a third replaces the waiting one. After triggering a rollback during a deploy, check the Actions tab that it is still queued.
+
+Every one of the three workflows first checks that the `production` environment has `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and `WORKER_NAME` (and `WORKER_SECRETS` for the sync), and fails naming whatever is missing.
 
 1. **resolve** pins the commit to a SHA, checks that it is on `main`, and refuses when another system is also building it: while Cloudflare Workers Builds is attached it posts a check run on every push (`scripts/ci/assert-no-foreign-builds.ts`).
 2. **verify** runs `ci.yml` on that exact commit.
@@ -166,7 +168,7 @@ The CI deploy token starts from the list in [setup.md](setup.md#cloudflare-accou
 
 Nothing deploys automatically. Complete these in order; each Cloudflare write is yours to make.
 
-1. **Disconnect Cloudflare Workers Builds.** It is connected to this repository today: every push produced a `Workers Builds: vibesdk-production` check run, and a merge to `main` would start a production build that runs the template's `scripts/deploy.ts`, which mints a new `JWT_SECRET` and uploads a broad token as the runtime token. In the dashboard, open the Worker, Settings, Builds, and disconnect (note the commands and root directory first). The deploy workflow refuses to run while the check run exists.
+1. **Disconnect Cloudflare Workers Builds.** It is connected to this repository today: every push produced a `Workers Builds: vibesdk-production` check run, and a merge to `main` would start a production build that runs the template's `scripts/deploy.ts`, which mints a new `JWT_SECRET` and uploads a broad token as the runtime token. In the dashboard, open the Worker, Settings, Builds, and disconnect (note the commands and root directory first). The deploy workflow refuses to deploy a commit that has the check run. A commit keeps it after you disconnect, so merge only after disconnecting; to return to a version built earlier use `rollback.yml`, not `deploy.yml`.
 2. **Check whether the Worker exists.** Workers Builds reported "This Worker does not exist on your account" for the account it is bound to. If so, the first deploy is a bootstrap: the D1 database, KV namespace, R2 bucket, dispatch namespace, AI Gateway and templates must exist first, and the container image needs a one-time push from a machine with Docker so its registry reference can be pinned.
 3. **Collect the live state.** Build (`bun run build`), then run `bun scripts/ci/preflight.ts --config dist/<worker>/wrangler.json --report` with a read-only API token in `CLOUDFLARE_API_TOKEN` and the account in `CLOUDFLARE_ACCOUNT_ID`. It prints the live bindings, migration tag, secret names and recent deployments next to the findings, and reads no value. It does not use the `wrangler login` session.
 4. **Re-home `wrangler.jsonc`.** Replace the template's routes, zone, `CUSTOM_DOMAIN`, D1, KV, R2, dispatch namespace and container image with this account's values, move the variables listed as "not secrets" above into `vars`, regenerate the Worker types, fill `zoneIds` and `resources` in `.github/deploy.config.json`, and set `"enforce": true`.

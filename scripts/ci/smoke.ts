@@ -11,7 +11,7 @@
  */
 import { parseArgs } from 'node:util';
 import { smokeChecks, type SmokeCheck, type SmokeResponse } from './lib/smoke';
-import { parseWranglerConfig } from './lib/verify-wrangler-config';
+import { isFullyQualifiedDomain, parseWranglerConfig } from './lib/verify-wrangler-config';
 import { fail, readJsonc, setOutputs } from './support';
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -34,8 +34,10 @@ function resolveBaseUrl(): string {
 	}
 
 	const domain = parseWranglerConfig(readJsonc(values.config)).vars?.CUSTOM_DOMAIN;
-	if (typeof domain !== 'string' || domain === '') {
-		throw new Error(`${values.config} has no vars.CUSTOM_DOMAIN to probe.`);
+	if (typeof domain !== 'string' || !isFullyQualifiedDomain(domain)) {
+		throw new Error(
+			`vars.CUSTOM_DOMAIN in ${values.config} is ${JSON.stringify(domain ?? null)}, not a fully qualified domain name, so there is no host to probe. Re-home wrangler.jsonc (docs/ci-cd.md).`,
+		);
 	}
 	return `https://${domain}`;
 }

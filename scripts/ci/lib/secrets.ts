@@ -3,9 +3,13 @@
  * secret value into a message: errors name secrets, never their contents.
  */
 import { jwtSecretProblems } from '../../../shared/utils/jwt-secret';
+import { formatMask } from './annotations';
 
 const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const MAX_SECRETS = 100;
+// Shorter lines are left unmasked so ordinary words such as "true" or "dev" do not
+// disappear from the logs.
+const MIN_MASKED_LENGTH = 8;
 
 export interface SecretsContext {
 	/** Names of `vars` committed in wrangler.jsonc. */
@@ -104,6 +108,21 @@ export function validateWorkerSecrets(raw: string, context: SecretsContext): Sec
 	}
 
 	return { errors, entries };
+}
+
+/**
+ * Mask commands for the runner, one per line of each value. A multi-line value
+ * (a private key, say) must be registered line by line: printed whole, only its
+ * first line would be treated as the command and the rest would reach the log.
+ */
+export function secretMaskCommands(values: Iterable<string>): string[] {
+	const lines = new Set<string>();
+	for (const value of values) {
+		for (const line of value.split(/\r?\n/)) {
+			if (line.length >= MIN_MASKED_LENGTH) lines.add(line);
+		}
+	}
+	return [...lines].map(formatMask);
 }
 
 /** What a sync would do, by name. Live secrets that are not listed stay as they are. */

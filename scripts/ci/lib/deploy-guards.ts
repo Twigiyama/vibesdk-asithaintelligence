@@ -57,10 +57,10 @@ export function decideRollback({
 	}
 	if (previousVersionId === undefined) {
 		reasons.push('No previous version was recorded, so there is nothing to roll back to.');
-	}
-
-	if (reasons.length > 0 || previousVersionId === undefined) {
 		return { action: 'manual', reasons };
 	}
-	return { action: 'rollback', versionId: previousVersionId };
+
+	return reasons.length > 0
+		? { action: 'manual', reasons }
+		: { action: 'rollback', versionId: previousVersionId };
 }

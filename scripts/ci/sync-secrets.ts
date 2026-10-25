@@ -21,11 +21,14 @@ import { formatReport } from './lib/annotations';
 import { fetchLiveWorker } from './lib/cloudflare';
 import { assertWorkerName, readCloudflareEnv } from './lib/env';
 import { activeDeployment, committedVarNames, isRollbackDeployment } from './lib/preflight';
-import { planSecretSync, validateWorkerSecrets, type SecretEntries } from './lib/secrets';
+import {
+	planSecretSync,
+	secretMaskCommands,
+	validateWorkerSecrets,
+	type SecretEntries,
+} from './lib/secrets';
 import { parseWranglerConfig } from './lib/verify-wrangler-config';
 import { fail, isGitHubActions, readJsonc } from './support';
-
-const MIN_MASKED_LENGTH = 8;
 
 const { values } = parseArgs({
 	args: process.argv.slice(2),
@@ -47,11 +50,8 @@ function maskValues(raw: string): void {
 	try {
 		const parsed: unknown = JSON.parse(raw);
 		if (typeof parsed !== 'object' || parsed === null) return;
-		for (const value of Object.values(parsed)) {
-			if (typeof value === 'string' && value.length >= MIN_MASKED_LENGTH) {
-				console.log(`::add-mask::${value}`);
-			}
-		}
+		const strings = Object.values(parsed).filter((value): value is string => typeof value === 'string');
+		for (const command of secretMaskCommands(strings)) console.log(command);
 	} catch {
 		// Invalid JSON is reported by validation, without echoing it.
 	}

@@ -137,6 +137,10 @@ export interface ConfigFinding {
 	message: string;
 }
 
+export function isFullyQualifiedDomain(value: string): boolean {
+	return fqdn.test(value);
+}
+
 export function parseWranglerConfig(raw: unknown): WranglerConfig {
 	return wranglerConfigSchema.parse(raw);
 }
@@ -201,7 +205,7 @@ function checkForeignHosts(config: WranglerConfig, expected: DeployConfig) {
 
 function checkCustomDomain(config: WranglerConfig) {
 	const domain = config.vars?.CUSTOM_DOMAIN;
-	if (typeof domain === 'string' && fqdn.test(domain)) return [];
+	if (typeof domain === 'string' && isFullyQualifiedDomain(domain)) return [];
 	return [
 		finding(
 			'custom-domain',
