@@ -11,27 +11,14 @@
  * "enforce": true; otherwise they are reported as warnings. The number of
  * findings is written to the `findings` step output when running in Actions.
  */
-import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import { formatReport } from './lib/annotations';
 import {
 	deployConfigSchema,
 	parseWranglerConfig,
 	verifyWranglerConfig,
 } from './lib/verify-wrangler-config';
-
-function readJsonc(path: string): unknown {
-	const errors: ParseError[] = [];
-	const value: unknown = parse(readFileSync(path, 'utf8'), errors, {
-		allowTrailingComma: true,
-	});
-	if (errors.length > 0) {
-		const detail = errors.map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`).join(', ');
-		throw new Error(`${path} is not valid JSONC: ${detail}`);
-	}
-	return value;
-}
+import { fail, isGitHubActions, readJsonc, setOutputs } from './support';
 
 const { values, positionals: configPaths } = parseArgs({
 	args: process.argv.slice(2),
@@ -48,7 +35,7 @@ if (configPaths.length === 0) {
 	process.exit(2);
 }
 
-const github = process.env.GITHUB_ACTIONS === 'true';
+const github = isGitHubActions();
 let total = 0;
 let enforced = values.enforce;
 
@@ -77,11 +64,10 @@ try {
 		if (findings.length === 0) console.log(`Wrangler config guard: ${path} matches ${expectPath}.`);
 	}
 } catch (error) {
-	console.error(error instanceof Error ? error.message : String(error));
-	process.exit(2);
+	fail(error);
 }
 
-if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `findings=${total}\n`);
+setOutputs({ findings: total });
 
 if (total > 0 && !enforced) {
 	console.log(

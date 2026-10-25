@@ -1,6 +1,7 @@
 import { jwtVerify, SignJWT } from 'jose';
 import { TokenPayload } from '../types/auth-types';
 import { SecurityError, SecurityErrorType } from 'shared/types/errors';
+import { jwtSecretProblems } from 'shared/utils/jwt-secret';
 import { createLogger } from '../logger';
 import { SessionService } from 'worker/database/services/SessionService';
 
@@ -28,29 +29,9 @@ export class JWTUtils {
     }
 
     private validateJWTSecret(secret: string): void {
-        if (secret.length < 32) {
-            throw new Error('JWT_SECRET must be at least 32 characters long for security');
-        }
-
-        const weakSecrets = ['default', 'secret', 'password', 'changeme', 'admin', 'test'];
-        if (weakSecrets.includes(secret.toLowerCase())) {
-            throw new Error('JWT_SECRET contains a weak/default value. Please use a cryptographically secure random string');
-        }
-
-        const hasLowercase = /[a-z]/.test(secret);
-        const hasUppercase = /[A-Z]/.test(secret);
-        const hasNumbers = /[0-9]/.test(secret);
-        const hasSpecial = /[^a-zA-Z0-9]/.test(secret);
-
-        const characterTypes = [hasLowercase, hasUppercase, hasNumbers, hasSpecial].filter(Boolean).length;
-
-        if (characterTypes < 3) {
-            throw new Error('JWT_SECRET must contain at least 3 different character types');
-        }
-
-        const hasRepeatingChars = /(.)\1{3,}/.test(secret);
-        if (hasRepeatingChars) {
-            throw new Error('JWT_SECRET contains repetitive patterns');
+        const [problem] = jwtSecretProblems(secret);
+        if (problem) {
+            throw new Error(problem);
         }
     }
 

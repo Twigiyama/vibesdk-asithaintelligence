@@ -1,0 +1,92 @@
+name: Roll back
+
+# Manual only. Puts an earlier version of the production Worker back on 100% of
+# traffic, then runs the smoke checks. D1 is forward-only and Cloudflare blocks a
+# rollback across a Durable Object class change; see the rollback runbook in
+# docs/ci-cd.md before using this after a release that had either.
+on:
+  workflow_dispatch:
+    inputs:
+      version_id:
+        description: Version to return to. Leave empty for the version before the current one.
+        type: string
+        required: false
+        default: ''
+      reason:
+        description: Why. Recorded on the deployment.
+        type: string
+        required: true
+      force_secret_revert:
+        description: Roll back even though secrets changed after that version, bringing their old values back.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  HUSKY: '0'
+  PUPPETEER_SKIP_DOWNLOAD: '1'
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  rollback:
+    name: rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Require a run from main
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from main (got $WORKFLOW_REF)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-toolchain
+
+      - name: Current deployments
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+        run: bunx wrangler deployments list --name "$WORKER_NAME"
+
+      - name: Roll back
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+          VERSION_ID: ${{ inputs.version_id }}
+          REASON: ${{ inputs.reason }}
+          FORCE_SECRET_REVERT: ${{ inputs.force_secret_revert }}
+        run: |
+          args=(--worker "$WORKER_NAME" --message "$REASON")
+          if [ -n "$VERSION_ID" ]; then
+            args+=(--version "$VERSION_ID")
+          fi
+          if [ "$FORCE_SECRET_REVERT" = "true" ]; then
+            args+=(--force-secret-revert)
+          fi
+          bun scripts/ci/rollback.ts "${args[@]}"
+
+      - name: Smoke checks
+        run: bun scripts/ci/smoke.ts --config wrangler.jsonc
+
+      - name: Deployments after the rollback
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+        run: bunx wrangler deployments list --name "$WORKER_NAME"

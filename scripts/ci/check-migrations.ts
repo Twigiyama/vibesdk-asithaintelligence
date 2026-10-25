@@ -15,6 +15,7 @@ import {
 	type MigrationChange,
 	type MigrationChangeStatus,
 } from './lib/check-migrations';
+import { isGitHubActions } from './support';
 
 const statuses: Record<string, MigrationChangeStatus> = {
 	A: 'added',
@@ -69,7 +70,7 @@ if (!base) {
 }
 
 const allowDestructive = values['allow-destructive'] || process.env.ALLOW_DESTRUCTIVE === 'true';
-const github = process.env.GITHUB_ACTIONS === 'true';
+const github = isGitHubActions();
 
 const changes = listChanges(base, head);
 const findings = checkMigrations(changes, { allowDestructive });
