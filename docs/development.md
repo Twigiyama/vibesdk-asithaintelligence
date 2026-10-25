@@ -32,7 +32,7 @@ cp .dev.vars.example .dev.vars
 perl -pi -e "s|^JWT_SECRET=.*|JWT_SECRET=\"$(openssl rand -base64 48)\"|" .dev.vars
 ```
 
-`.dev.vars` is gitignored; never commit it and never copy production secrets into it. Wrangler loads it for local development only, and its values override the matching `vars` in `wrangler.jsonc`. The template documents every variable the Worker reads.
+`.dev.vars` is gitignored; never commit it and never copy production secrets into it. Wrangler loads it for local development only, and its values override the matching `vars` in `wrangler.jsonc`. The template lists the settings the Worker reads from `.dev.vars`; bindings and the `vars` already in `wrangler.jsonc` are not repeated there.
 
 ## Verify
 

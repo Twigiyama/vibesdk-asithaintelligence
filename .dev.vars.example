@@ -66,6 +66,19 @@ JWT_SECRET=""
 
 # --- Other -----------------------------------------------------------------
 #SENTRY_DSN=""
+# Cloudflare Access service token sent with Sentry tunnel requests.
+#CF_ACCESS_ID=""
+#CF_ACCESS_SECRET=""
+# Key for the agent's web search tool.
+#SERPAPI_KEY=""
 #AI_PROXY_JWT_SECRET=""
 #CUSTOM_PREVIEW_DOMAIN=""
 #PLATFORM_MODEL_PROVIDERS=""
+
+# --- Legacy sandbox (agentic and phasic agents only) -----------------------
+# The Think agent used for apps does not use any of these.
+#SANDBOX_SERVICE_TYPE=""      # "runner" selects the remote sandbox service
+#SANDBOX_SERVICE_URL=""
+#SANDBOX_SERVICE_API_KEY=""
+#ALLOCATION_STRATEGY=""       # many_to_one or one_to_one
+#USE_TUNNEL_FOR_PREVIEW=""
