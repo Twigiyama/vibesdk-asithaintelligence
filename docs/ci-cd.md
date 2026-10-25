@@ -23,7 +23,7 @@ There is one environment, production. The only deployer is GitHub Actions. `scri
 | | `bun audit --audit-level high` | No (report only) |
 | `gate` | Succeeds only when all four jobs succeeded | The only required check |
 
-Every job has a 15-minute timeout and read-only repository permissions. The pull request title is the squash commit subject, so it is linted again whenever it is edited. A new commit cancels the run in flight; editing the title, description or labels instead queues one more run for the same commit, because a run that skipped its checks could otherwise turn a failed commit green. PR titles and branch names reach scripts through `env:`, never interpolated into `run:`.
+Every job has a 15-minute timeout and read-only repository permissions. The pull request title is the squash commit subject, so it is linted again whenever it is edited. Dependabot pull requests are exempt, because Dependabot capitalizes "Bump", which the `subject-case` rule rejects, and `dependabot.yml` already fixes their type and scope. A new commit cancels the run in flight; editing the title, description or labels instead queues one more run for the same commit, because a run that skipped its checks could otherwise turn a failed commit green. PR titles and branch names reach scripts through `env:`, never interpolated into `run:`.
 
 Run the blocking checks locally with `bun run verify` (see [development.md](development.md)).
 
