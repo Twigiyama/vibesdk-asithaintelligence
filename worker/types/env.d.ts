@@ -11,18 +11,28 @@ declare namespace Cloudflare {
 		USE_CLOUDFLARE_IMAGES?: string;
 		USE_TUNNEL_FOR_PREVIEW?: string;
 
-		// Secret bindings are omitted by `wrangler types` when absent from .dev.vars.
+		// Secret bindings are omitted by `wrangler types` unless named in
+		// .dev.vars.example, which `bun run cf-typegen` reads instead of a
+		// developer's own .dev.vars so the generated types stay deterministic.
 		AI_PROXY_JWT_SECRET: string;
 		ANTHROPIC_API_KEY: string;
 		CF_ACCESS_ID: string;
 		CF_ACCESS_SECRET: string;
+		CF_OAUTH_ENCRYPTION_KEY: string;
+		CLOUDFLARE_ACCOUNT_ID: string;
+		CLOUDFLARE_AI_GATEWAY_TOKEN: string;
 		CLOUDFLARE_AI_GATEWAY_URL: string;
+		CLOUDFLARE_API_TOKEN: string;
+		CLOUDFLARE_OAUTH_CLIENT_ID: string;
+		CLOUDFLARE_OAUTH_CLIENT_SECRET: string;
 		CUSTOM_PREVIEW_DOMAIN: string;
 		GOOGLE_AI_STUDIO_API_KEY: string;
 		GOOGLE_CLIENT_ID: string;
 		GOOGLE_CLIENT_SECRET: string;
 		GITHUB_CLIENT_ID: string;
 		GITHUB_CLIENT_SECRET: string;
+		GITHUB_EXPORTER_CLIENT_ID: string;
+		GITHUB_EXPORTER_CLIENT_SECRET: string;
 		OPENROUTER_API_KEY: string;
 		PLATFORM_MODEL_PROVIDERS: string;
 		SANDBOX_SERVICE_API_KEY: string;

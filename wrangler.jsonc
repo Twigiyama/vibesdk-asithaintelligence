@@ -242,5 +242,10 @@
         "DEV_BROWSER_PREVIEW_ORIGIN": "http://localhost:5173"
     },
 	"workers_dev": false,
-	"preview_urls": false
+	"preview_urls": false,
+	// Local dev must not build SandboxDockerfile; Think app previews do not use
+	// the sandbox container.
+	"dev": {
+		"enable_containers": false
+	}
 }

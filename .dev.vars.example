@@ -6,6 +6,10 @@
 # secrets here: deployed secrets never come from this file.
 #
 # Values here override the matching `vars` in wrangler.jsonc during local dev.
+#
+# Local dev runs offline: the AI, Browser and dispatch bindings are not
+# connected. To connect them to your account, run `wrangler login` and start
+# with VIBESDK_REMOTE_BINDINGS=1 (see docs/development.md).
 
 # --- Environment -----------------------------------------------------------
 # "dev" relaxes CSP and HSTS, and skips the ratelimit bindings, which do not
