@@ -175,6 +175,16 @@ Nothing deploys automatically. Complete these in order; each Cloudflare write is
 7. **Deploy once by hand** (`gh workflow run deploy.yml -f ref=main`), confirm the smoke checks pass and the new version carries the SHA tag, then register and sign in by hand.
 8. **Exercise the rollback** while there are no users, then deploy forward again.
 
+## Deploying on every merge (the last step)
+
+`deploy.yml` stays manual until the checklist above is complete and a manual deploy, a rollback and a forward deploy have all worked. Only then is it worth making a merge to `main` deploy by itself. The change is small:
+
+1. Add the trigger: `on.push.branches: [main]`.
+2. In `resolve`, take the commit from `inputs.ref || github.sha` (inputs are empty on a push), and skip when a newer commit has landed: if `git rev-parse origin/main` is not `GITHUB_SHA`, set an output `skip=true`, and put `if: needs.resolve.outputs.skip != 'true'` on `verify` and `deploy`. The newest commit then carries the deploy, and the concurrency group (which keeps only the newest pending run) serializes the rest.
+3. Merge a trivial documentation pull request and confirm it deploys on its own.
+
+Even then every manual-run safeguard still applies, because they are steps of the same job: the commit must be on `main`, CI must pass on it, the configuration guards are enforced, the preflight must be clean, and a failed smoke check rolls back or fails the run.
+
 ## Runbooks
 
 **Deploy.** `gh workflow run deploy.yml -f ref=main`. Read the job summary for the Worker version and the D1 restore point.
