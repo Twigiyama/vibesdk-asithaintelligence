@@ -1,0 +1,40 @@
+name: Require the production environment
+description: Fail before any work, naming what is missing, when the production environment is not fully configured.
+
+inputs:
+  token-set:
+    description: Whether the CLOUDFLARE_API_TOKEN environment secret is set (true or false).
+    required: true
+  account-id:
+    description: The CLOUDFLARE_ACCOUNT_ID environment variable.
+    required: true
+  worker-name:
+    description: The WORKER_NAME environment variable.
+    required: true
+  worker-secrets-set:
+    description: Whether the WORKER_SECRETS environment secret is set (true or false), or not-needed.
+    required: false
+    default: not-needed
+
+runs:
+  using: composite
+  steps:
+    - name: Check the environment configuration
+      shell: bash
+      env:
+        TOKEN_SET: ${{ inputs.token-set }}
+        ACCOUNT_ID: ${{ inputs.account-id }}
+        WORKER_NAME: ${{ inputs.worker-name }}
+        WORKER_SECRETS_SET: ${{ inputs.worker-secrets-set }}
+      run: |
+        missing=()
+        if [ "$TOKEN_SET" != "true" ]; then missing+=("secret CLOUDFLARE_API_TOKEN"); fi
+        if [ -z "$ACCOUNT_ID" ]; then missing+=("variable CLOUDFLARE_ACCOUNT_ID"); fi
+        if [ -z "$WORKER_NAME" ]; then missing+=("variable WORKER_NAME"); fi
+        if [ "$WORKER_SECRETS_SET" = "false" ]; then missing+=("secret WORKER_SECRETS"); fi
+
+        if [ "${#missing[@]}" -gt 0 ]; then
+          printf -v list '%s, ' "${missing[@]}"
+          echo "::error::The production environment is missing: ${list%, }. See 'Before the first deploy' in docs/ci-cd.md."
+          exit 1
+        fi

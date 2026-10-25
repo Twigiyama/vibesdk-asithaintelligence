@@ -11,18 +11,20 @@ Current generated-app previews use SpaceDO, a Worker Loader binding, and Dynamic
 Before getting started, make sure you have:
 
 ### Required
-- **Node.js** (v22 or later)
+- **Node.js** (v22 or later; this repository pins 22 in `.nvmrc`)
 - **Cloudflare account** with API access  
 - **Cloudflare API Token** with appropriate permissions
 
 ### Recommended
-- **Bun**
+- **Bun** (this repository pins 1.3.14 in `.bun-version`)
 - **Custom domain** configured in Cloudflare (for production deployment)
 
 ### For Production Features
 - **Workers Paid Plan** (for remote Cloudflare resources)
 - **Workers for Platforms** subscription (for app deployment features)
 - **Advanced Certificate Manager** (if using first-level subdomains)
+
+> This repository has its own workflow. For a working checkout use [development.md](development.md) (toolchain, `.dev.vars.example`, the checks CI runs) and [ci-cd.md](ci-cd.md) (pull request checks, deploys, rollbacks, secrets). The automated setup and deploy scripts below create Cloudflare resources and rewrite tracked files, so they are for bootstrapping a new environment, not for everyday use.
 
 ## Quick Start
 
@@ -344,6 +346,8 @@ ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 3. Ensure all prerequisites are met
 
 ## Production Deployment
+
+Routine production deploys of this repository run through the Deploy workflow described in [ci-cd.md](ci-cd.md). The rest of this section describes the template's one-time bootstrap deploy.
 
 If you configured remote deployment during setup, you'll have a `.prod.vars` file ready for production. Deploy with:
 

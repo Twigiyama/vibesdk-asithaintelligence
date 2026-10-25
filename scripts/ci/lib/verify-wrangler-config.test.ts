@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	deployConfigSchema,
+	isFullyQualifiedDomain,
 	parseWranglerConfig,
 	verifyWranglerConfig,
 	type DeployConfig,
@@ -400,4 +401,17 @@ describe('verifyWranglerConfig', () => {
 			expect(rules(config)).toEqual([]);
 		});
 	});
+});
+
+describe('isFullyQualifiedDomain', () => {
+	it.each(['vibes.example.com', 'a.b.example.co.uk'])('accepts %j', (value) => {
+		expect(isFullyQualifiedDomain(value)).toBe(true);
+	});
+
+	it.each(['attest', 'localhost:5173', 'https://vibes.example.com', 'Vibes.Example.com', ''])(
+		'rejects %j',
+		(value) => {
+			expect(isFullyQualifiedDomain(value)).toBe(false);
+		},
+	);
 });

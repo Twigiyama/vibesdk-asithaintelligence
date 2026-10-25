@@ -34,6 +34,11 @@ export function formatAnnotation({
 	return `::${head}::${escapeData(message)}`;
 }
 
+/** Registers a value so the runner masks it in every log from then on. */
+export function formatMask(value: string): string {
+	return `::add-mask::${escapeData(value)}`;
+}
+
 /** A workflow command on GitHub Actions, one readable line anywhere else. */
 export function formatReport(annotation: Annotation, github: boolean): string {
 	if (github) return formatAnnotation(annotation);

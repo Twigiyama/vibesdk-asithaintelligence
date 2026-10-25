@@ -93,9 +93,11 @@ Authentication providers, model providers, and export integrations are optional 
 
 ### Prerequisites
 
-- Node.js 18 or later
-- [Bun](https://bun.sh/)
+- Node.js 22 (`.nvmrc`)
+- [Bun](https://bun.sh/) 1.3.14 (`.bun-version`)
 - A Cloudflare account and API token
+
+> This repository pins its toolchain and ships through a CI/CD pipeline. Local setup, the checks that CI runs and the git hooks are in [`docs/development.md`](docs/development.md); pull request checks, deploys, rollbacks and secrets are in [`docs/ci-cd.md`](docs/ci-cd.md). `bun run setup` and `bun run deploy` are one-time bootstrap scripts that rewrite tracked files and create Cloudflare resources; do not run them in a working checkout.
 
 ### Quick start
 
@@ -122,11 +124,13 @@ Feature settings are dashboard-managed rather than committed in `wrangler.jsonc`
 | `bun run dev` | Start the frontend development server |
 | `bun run dev:browser` | Start the optional local browser sidecar used for console-log inspection |
 | `bun run build` | Build SpaceDO and the Vite application |
+| `bun run verify` | Run typecheck, lint, the `space` typecheck and the tests (the blocking CI checks) |
 | `bun run typecheck` | Run TypeScript type checking |
 | `bun run lint` | Run ESLint |
 | `bun run test` | Run the test suite |
 | `bun run test:watch` | Run tests in watch mode |
-| `bun run deploy` | Build, migrate, and deploy using `.prod.vars` |
+| `bun run cf-typegen:check` | Fail when `worker-configuration.d.ts` is stale |
+| `bun run deploy` | Template bootstrap script (builds, migrates and deploys using `.prod.vars`). Routine deploys use the Deploy workflow; see [`docs/ci-cd.md`](docs/ci-cd.md) |
 
 ## Security and isolation
 
@@ -149,15 +153,18 @@ More diagnostics are available in the [setup guide](docs/setup.md). For help, us
 ## Contributing
 
 1. Fork and clone the repository.
-2. Run `bun install` and `bun run setup`.
+2. Follow [`docs/development.md`](docs/development.md) to install the toolchain and dependencies.
 3. Make focused changes that follow [`AGENTS.md`](AGENTS.md).
-4. Run `bun run typecheck`, `bun run lint`, and `bun run test`.
+4. Run `bun run verify`.
 5. Open a pull request describing the change and how you validated it.
 
 ## Resources
 
 - [VibeSDK demo](https://build.cloudflare.dev)
 - [VibeSDK setup guide](docs/setup.md)
+- [Local development](docs/development.md)
+- [CI/CD](docs/ci-cd.md)
+- [Cloudflare tooling](docs/cloudflare-tooling.md)
 - [Cloudflare Workers](https://developers.cloudflare.com/workers/)
 - [Cloudflare Agents](https://developers.cloudflare.com/agents/)
 - [Durable Objects](https://developers.cloudflare.com/durable-objects/)

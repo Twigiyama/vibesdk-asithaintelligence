@@ -1,0 +1,269 @@
+name: Deploy
+
+# Manual only. Deploys a commit that is on main to the production Worker after
+# re-running CI on it and comparing the build with the live Worker. Normal
+# deploys never touch secrets; see sync-secrets.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit to deploy. It must be on main.
+        type: string
+        required: true
+        default: main
+      skip_migrations:
+        description: Skip D1 migrations. Only for migrations that were applied by hand.
+        type: boolean
+        default: false
+      allow_missing_worker:
+        description: Allow the first deploy of a Worker that does not exist yet.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  HUSKY: '0'
+  PUPPETEER_SKIP_DOWNLOAD: '1'
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  resolve:
+    name: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      short_sha: ${{ steps.commit.outputs.short_sha }}
+      subject: ${{ steps.commit.outputs.subject }}
+    steps:
+      - name: Require a run from main
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from main (got $WORKFLOW_REF); choose the commit with the ref input."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-toolchain
+
+      - name: Resolve the commit
+        id: commit
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse --verify --end-of-options "${REF}^{commit}")"
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not on main; only commits on main can be deployed."
+            exit 1
+          fi
+          {
+            echo "sha=$sha"
+            echo "short_sha=${sha:0:12}"
+            echo "subject=$(git log -1 --format=%s "$sha" | cut -c1-100)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: No competing build on the commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: bun scripts/ci/assert-no-foreign-builds.ts --repo "$REPOSITORY" --sha "$SHA"
+
+  verify:
+    name: verify
+    needs: resolve
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+
+  deploy:
+    name: deploy
+    needs: [resolve, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+    env:
+      SHA: ${{ needs.resolve.outputs.sha }}
+      SHORT_SHA: ${{ needs.resolve.outputs.short_sha }}
+      SUBJECT: ${{ needs.resolve.outputs.subject }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/require-environment
+        with:
+          token-set: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          worker-name: ${{ vars.WORKER_NAME }}
+
+      - uses: ./.github/actions/setup-toolchain
+
+      - name: Check the committed configuration
+        run: bun scripts/ci/verify-wrangler-config.ts --enforce wrangler.jsonc
+
+      - name: Build
+        run: bun run build
+
+      - name: Locate the generated configuration
+        id: config
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/*/wrangler.json)
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one dist/<worker>/wrangler.json, found ${#files[@]}."
+            exit 1
+          fi
+          {
+            echo "path=${files[0]}"
+            echo "d1_name=$(jq -r '.d1_databases[0].database_name // empty' "${files[0]}")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check the configuration that will be uploaded
+        env:
+          CONFIG: ${{ steps.config.outputs.path }}
+        run: bun scripts/ci/verify-wrangler-config.ts --enforce "$CONFIG"
+
+      - name: Compare with the live Worker
+        id: preflight
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+          CONFIG: ${{ steps.config.outputs.path }}
+          ALLOW_MISSING_WORKER: ${{ inputs.allow_missing_worker }}
+        run: |
+          args=(--config "$CONFIG")
+          if [ "$ALLOW_MISSING_WORKER" = "true" ]; then
+            args+=(--allow-missing-worker)
+          fi
+          bun scripts/ci/preflight.ts "${args[@]}"
+
+      - name: Record a D1 restore point
+        id: bookmark
+        if: steps.config.outputs.d1_name != ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          D1_NAME: ${{ steps.config.outputs.d1_name }}
+        run: |
+          set -euo pipefail
+          bookmark="$(bunx wrangler d1 time-travel info "$D1_NAME" --json | sed -n '/^{/,$p' | jq -r '.bookmark // empty')"
+          if [ -z "$bookmark" ]; then
+            echo "::error::Could not read a Time Travel bookmark for $D1_NAME."
+            exit 1
+          fi
+          echo "bookmark=$bookmark" >> "$GITHUB_OUTPUT"
+
+      # Migrations run before the new code is uploaded. The migration guard keeps
+      # them additive, so the release that is still serving traffic keeps working.
+      - name: Apply D1 migrations
+        id: migrate
+        if: ${{ !inputs.skip_migrations && steps.preflight.outputs.d1_pending_count != '0' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          D1_NAME: ${{ steps.config.outputs.d1_name }}
+        run: bunx wrangler d1 migrations apply "$D1_NAME" --remote
+
+      # No --containers-rollout: wrangler 4.90 only accepts immediate or gradual.
+      # The container image is pinned to the live registry reference, so a deploy
+      # leaves the container application unchanged.
+      - name: Deploy
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          bunx wrangler deploy --tag "$SHORT_SHA" --message="$SUBJECT" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          version="$(sed -n 's/^Current Version ID: *//p' "$RUNNER_TEMP/deploy.log" | tail -n 1)"
+          echo "version_id=${version:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke checks
+        id: smoke
+        continue-on-error: true
+        env:
+          CONFIG: ${{ steps.config.outputs.path }}
+        run: bun scripts/ci/smoke.ts --config "$CONFIG"
+
+      - name: Decide on a rollback
+        id: decision
+        env:
+          SMOKE_FAILED: ${{ steps.smoke.outcome == 'failure' }}
+          D1_APPLIED: ${{ steps.migrate.outcome == 'success' && steps.preflight.outputs.d1_pending_count || '0' }}
+          DO_MIGRATION_APPLIED: ${{ steps.preflight.outputs.do_migrations_pending }}
+          PREVIOUS_VERSION: ${{ steps.preflight.outputs.previous_version_id }}
+        run: |
+          bun scripts/ci/decide-rollback.ts \
+            --smoke-failed "$SMOKE_FAILED" \
+            --d1-applied "$D1_APPLIED" \
+            --do-migration-applied "$DO_MIGRATION_APPLIED" \
+            --previous-version "$PREVIOUS_VERSION"
+
+      - name: Roll back
+        if: steps.decision.outputs.action == 'rollback'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+          VERSION_ID: ${{ steps.decision.outputs.version_id }}
+        run: |
+          bun scripts/ci/rollback.ts \
+            --worker "$WORKER_NAME" \
+            --version "$VERSION_ID" \
+            --message "auto-rollback: smoke checks failed for $SHORT_SHA"
+
+      - name: Fail the run when the smoke checks failed
+        if: steps.smoke.outcome == 'failure'
+        run: |
+          echo "::error::The smoke checks failed after deploying $SHORT_SHA. See the rollback decision above and the rollback runbook in docs/ci-cd.md."
+          exit 1
+
+      - name: Summary
+        if: always()
+        env:
+          VERSION_ID: ${{ steps.deploy.outputs.version_id }}
+          BOOKMARK: ${{ steps.bookmark.outputs.bookmark }}
+          D1_PENDING: ${{ steps.preflight.outputs.d1_pending_count }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          DO_PENDING: ${{ steps.preflight.outputs.do_migrations_pending }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          ROLLBACK_ACTION: ${{ steps.decision.outputs.action }}
+        run: |
+          {
+            echo "### Production deploy"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Commit | \`$SHA\` |"
+            echo "| Version tag | \`$SHORT_SHA\` |"
+            echo "| Worker version | \`${VERSION_ID:-not deployed}\` |"
+            echo "| D1 restore point | \`${BOOKMARK:-none}\` |"
+            echo "| D1 migrations | ${D1_PENDING:-0} pending, step ${MIGRATE_OUTCOME:-not run} |"
+            echo "| Durable Object migrations applied | ${DO_PENDING:-unknown} |"
+            echo "| Smoke checks | ${SMOKE_OUTCOME:-not run} |"
+            echo "| Rollback | ${ROLLBACK_ACTION:-not evaluated} |"
+          } >> "$GITHUB_STEP_SUMMARY"

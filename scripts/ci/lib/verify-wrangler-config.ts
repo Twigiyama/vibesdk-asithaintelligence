@@ -61,6 +61,25 @@ const wranglerConfigSchema = z.looseObject({
 		)
 		.optional(),
 	migrations: z.array(z.looseObject({ tag: z.string() })).optional(),
+	durable_objects: z
+		.looseObject({
+			bindings: z
+				.array(z.looseObject({ name: z.string(), class_name: z.string() }))
+				.optional(),
+		})
+		.optional(),
+	ai: z.looseObject({ binding: z.string() }).optional(),
+	browser: z.looseObject({ binding: z.string() }).optional(),
+	assets: z.looseObject({ binding: z.string().optional() }).optional(),
+	version_metadata: z.looseObject({ binding: z.string() }).optional(),
+	worker_loaders: z.array(z.looseObject({ binding: z.string() })).optional(),
+	unsafe: z
+		.looseObject({
+			bindings: z
+				.array(z.looseObject({ name: z.string(), type: z.string() }))
+				.optional(),
+		})
+		.optional(),
 });
 
 export const deployConfigSchema = z.looseObject({
@@ -116,6 +135,10 @@ export type ConfigRule =
 export interface ConfigFinding {
 	rule: ConfigRule;
 	message: string;
+}
+
+export function isFullyQualifiedDomain(value: string): boolean {
+	return fqdn.test(value);
 }
 
 export function parseWranglerConfig(raw: unknown): WranglerConfig {
@@ -182,7 +205,7 @@ function checkForeignHosts(config: WranglerConfig, expected: DeployConfig) {
 
 function checkCustomDomain(config: WranglerConfig) {
 	const domain = config.vars?.CUSTOM_DOMAIN;
-	if (typeof domain === 'string' && fqdn.test(domain)) return [];
+	if (typeof domain === 'string' && isFullyQualifiedDomain(domain)) return [];
 	return [
 		finding(
 			'custom-domain',

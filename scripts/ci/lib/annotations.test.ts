@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatAnnotation, formatReport } from './annotations';
+import { formatAnnotation, formatMask, formatReport } from './annotations';
 
 describe('formatReport', () => {
 	const annotation = {
@@ -69,5 +69,15 @@ describe('formatAnnotation', () => {
 		expect(formatAnnotation({ level: 'notice', message: 'a: b, c' })).toBe(
 			'::notice::a: b, c',
 		);
+	});
+});
+
+describe('formatMask', () => {
+	it('registers a value with the runner', () => {
+		expect(formatMask('sk-test-12345678')).toBe('::add-mask::sk-test-12345678');
+	});
+
+	it('escapes the characters the runner decodes, so the mask matches the real value', () => {
+		expect(formatMask('a%0Ab%25c\r\nd')).toBe('::add-mask::a%250Ab%2525c%0D%0Ad');
 	});
 });
