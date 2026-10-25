@@ -1,0 +1,6 @@
+{
+	"$comment": "Production identity checked by scripts/ci/verify-wrangler-config.ts against wrangler.jsonc and the generated dist/<worker>/wrangler.json. Add zoneIds and resources (D1, KV, R2, namespaces) with the values from the live account when the config is re-homed; omitted values are not compared. Set enforce to true in the same change: until then pull request CI reports findings as warnings (deploys always enforce). See docs/ci-cd.md.",
+	"enforce": false,
+	"workerName": "vibesdk-production",
+	"forbiddenHostSuffixes": ["cloudflare.dev"]
+}

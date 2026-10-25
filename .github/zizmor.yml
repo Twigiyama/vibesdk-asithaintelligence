@@ -1,0 +1,5 @@
+rules:
+  # GitHub's `uses: $/...` self-repository syntax is preferred, but actionlint
+  # (also run in CI) rejects it. Revisit when actionlint supports it.
+  self-repository:
+    disable: true

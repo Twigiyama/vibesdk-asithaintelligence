@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+  workflow_call:
+
+permissions:
+  contents: read
+
+# A pull request keeps only its newest run. Runs started by workflow_call get
+# their own group, so a deploy never cancels or queues behind another.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  HUSKY: '0'
+  PUPPETEER_SKIP_DOWNLOAD: '1'
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-toolchain
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Worker types are current
+        run: bun run cf-typegen:check
+
+      - name: Tests
+        run: bun run test
+
+      - name: Typecheck space
+        run: bun run --cwd space typecheck
+
+      # Reports 72 unused files and 24 unused dependencies at adoption. Make it
+      # blocking by removing continue-on-error once the findings are cleared.
+      - name: Knip (report only)
+        continue-on-error: true
+        run: bun run knip
+
+      - name: Pull request title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | bunx commitlint
+
+      - name: Migration guard
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ALLOW_DESTRUCTIVE: ${{ contains(github.event.pull_request.labels.*.name, 'destructive-migration') }}
+        run: bun scripts/ci/check-migrations.ts --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-toolchain
+
+      - name: Build
+        run: bun run build
+
+      # Advisory until .github/deploy.config.json declares the production
+      # resources, then blocking. See docs/ci-cd.md.
+      - name: Wrangler config guard
+        id: config-guard
+        run: bun scripts/ci/verify-wrangler-config.ts wrangler.jsonc dist/*/wrangler.json
+
+      # Only meaningful once the container image is pinned to a registry
+      # reference; with a Dockerfile path wrangler would build the image here.
+      - name: Wrangler dry run
+        if: steps.config-guard.outputs.findings == '0'
+        run: bunx wrangler deploy --dry-run
+
+  sdk:
+    name: sdk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-toolchain
+
+      - name: Install sdk dependencies
+        working-directory: sdk
+        run: bun install --frozen-lockfile
+
+      - name: Package sdk
+        working-directory: sdk
+        run: bun run package
+
+  security:
+    name: security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-toolchain
+
+      # The checksum is pinned together with the version. Dependabot cannot
+      # update it: change both when bumping gitleaks.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/gitleaks" gitleaks
+          echo "$RUNNER_TEMP/gitleaks" >> "$GITHUB_PATH"
+
+      - name: Scan for secrets in pull request commits
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: gitleaks git --redact --no-banner --log-opts="${BASE_SHA}..${HEAD_SHA}"
+
+      - name: Scan for secrets in history
+        if: github.event_name != 'pull_request'
+        run: gitleaks git --redact --no-banner
+
+      # 168 advisories at adoption. Make it blocking by removing
+      # continue-on-error once `bun audit --audit-level high` is clean.
+      - name: Audit dependencies (report only)
+        continue-on-error: true
+        run: bun audit --audit-level high
+
+      - name: Lint workflows
+        run: pipx run --spec actionlint-py==1.7.12.25 actionlint
+
+      - name: Audit workflow security
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pipx run zizmor==1.31.1 --format github .github
+
+  gate:
+    name: gate
+    if: always()
+    needs: [check, build, sdk, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "A required job finished with: $result"
+              exit 1
+            fi
+          done

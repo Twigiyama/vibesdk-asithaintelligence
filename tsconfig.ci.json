@@ -1,0 +1,9 @@
+{
+	"extends": "./tsconfig.node.json",
+	"compilerOptions": {
+		"composite": true,
+		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.ci.tsbuildinfo",
+		"types": ["node"]
+	},
+	"include": ["scripts/ci"]
+}
