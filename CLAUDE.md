@@ -1,6 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+@AGENTS.md
+
+AGENTS.md (imported above) is the source of truth for commands, verification quirks, frontend conventions, change paths, and constraints. This file adds architecture context and project rules; do not restate AGENTS.md here.
 
 ## Communication Style
 - Be professional, concise, and direct
@@ -13,104 +17,81 @@ This file provides guidance to Claude Code when working with code in this reposi
 VibeSDK is an agentic full-stack application builder on Cloudflare.
 
 **Tech Stack:**
-- Frontend: React 19, TypeScript, Vite, TailwindCSS, React Router v7
-- Backend: Cloudflare Workers, Durable Objects, Hono, D1, R2, and KV
+- Frontend: React 19, TypeScript, Vite, TailwindCSS v4, React Router v7
+- Backend: Cloudflare Workers, Durable Objects, Hono, D1 (Drizzle), R2, and KV
 - Agent: Cloudflare Think with AI Gateway model routing
-- Workspace: SpaceDO Durable Objects
-- Version history: Cloudflare Artifacts
+- Workspace: SpaceDO Durable Object (`space/` workspace package)
+- Version history: Cloudflare Artifacts (opt-in via `ENABLE_ARTIFACTS`)
 - Preview runtime: Worker Loader bindings and Dynamic Workers
 - Generated app data: Durable Object Facets with isolated SQLite
 - WebSocket: PartySocket for real-time communication
+- Tooling: Bun, Node >= 22
 
-**Project Structure:**
-- `/src` - React frontend, API types, and API client
-- `/worker/agents/think` - ThinkAgent, prompts, skills, workspace adapter, and tools
-- `/worker/agents/core/behaviors/think.ts` - Think host orchestration
-- `/worker/api` - Routes, controllers, handlers, and WebSocket types
-- `/worker/database` - D1 schema and services
-- `/space` - SpaceDO, Artifacts synchronization, preview bundling, and App Facets
-- `/sdk` - TypeScript client SDK
-- `/migrations` - D1 migrations
-- `/scripts` - Setup and deployment utilities
+**Non-obvious directories:** `container/` (sandbox container tooling for the legacy path), `packages/artifacts-viewer/` (vendored git subtree), `sdk/` (independent Bun package), `debug-tools/` (Python and TypeScript analysis scripts).
 
-## Key Architectural Patterns
+## Architecture
 
-**ThinkAgent:**
-- One Agent backed by a Durable Object per app session
-- Owns conversation, context selection, skills, streaming, tools, and step limits
-- Uses explicit SpaceDO-backed tools; workspace bash is disabled
+An app session spans three Durable Objects. The browser opens a WebSocket (`/api/agent/:agentId/ws`, owner-only) to `CodeGeneratorAgent`, which drives `ThinkAgent` over DO RPC; `ThinkAgent` edits files and deploys through `SpaceDO` over DO RPC.
 
-**Workspace and Versioning:**
-- SpaceDO owns the isolated live workspace and files
-- Cloudflare Artifacts owns durable commits, branches, history, and restore points
-- `commit` saves without deploying; `deploy_space` commits and rebuilds the preview
-- Rollback applies a selected tree, creates a new commit, and redeploys
+| Component | Binding | Code |
+|---|---|---|
+| `CodeGeneratorAgent`: session host, WebSocket endpoint, behavior selection | `CodeGenObject` | `worker/agents/core/codingAgent.ts` |
+| `ThinkCodingBehavior`: host orchestration, runs inside `CodeGeneratorAgent` | n/a | `worker/agents/core/behaviors/think.ts` |
+| `ThinkAgent`: model-and-tool loop, extends `@cloudflare/think` | `THINK_DO` | `worker/agents/think/ThinkAgent.ts` |
+| `SpaceDO`: workspace, files, preview and deploy | `SPACE_DO` | `space/src/space/durable-object.ts` |
 
-**Preview Runtime:**
-- `@cloudflare/worker-bundler` builds committed project files
-- Worker Loader loads bundled modules as a Dynamic Worker
-- Generated `App` classes run as Durable Object Facets with isolated SQLite
+**Behavior selection.** `CodeGeneratorAgent.onStart` resolves the behavior from explicit props, then persisted `state.behaviorType`, then the feature registry in `worker/agents/core/features/types.ts`: project type `app` maps to `think`; `presentation`, `workflow`, and `general` map to `agentic`. `phasic` is reachable only for sessions persisted with it and their clones (`cloneAgent` in `worker/agents/index.ts` carries `behaviorType` over).
 
-**WebSocket Communication:**
-- PartySocket carries realtime agent output, tools, files, and deployment state
-- Session state is restored on reconnect
+**Think path.** `ThinkCodingBehavior` pushes model and prompt config to `ThinkAgent` with `configureVibe`, calls `chat()` with an `RpcTarget` forwarder, and translates the streamed AI SDK `UIMessageChunk` frames into VibeSDK WebSocket events. `ThinkAgent` uses explicit tools only (workspace bash is disabled) and reaches files through `space-workspace-ops.ts`. Prompts and skills live in `worker/agents/think/prompts/` and `worker/agents/think/skills/`. New Think tools need focused tests.
 
-## Common Development Tasks
+**Legacy path.** `agentic` and `phasic` use the tools in `worker/agents/tools/` (`customTools.ts`, `toolkit/`), the `operations/`, `planning/`, and `assistants/` code under `worker/agents/`, and previews through the sandbox service (`worker/services/sandbox/`, `UserAppSandboxService` container). The Think path bypasses all of it; confirm which path a change affects.
 
-**Change LLM Model for Operation:**
-Edit `/worker/agents/inferutils/config.ts` → `AGENT_CONFIG` object
+**Workspace and versioning.**
+- `commit` saves without deploying; `deploy_space` commits and rebuilds the preview. Rollback applies a selected tree, creates a new commit, and redeploys.
+- Each SpaceDO resolves its storage backend once and pins it (`resolveSpaceFsBackendMode` in `space/src/space/fs-backend.ts`). A new space uses Cloudflare Artifacts for git history when `ENABLE_ARTIFACTS="true"` and the `ARTIFACTS` binding exists, otherwise `SqlBackend` keeps local git history in SQLite. A space that already has Artifacts state stays on Artifacts, and `ArtifactsBackend` throws if the binding is later removed, so changing the flag does not migrate existing spaces.
+- Describe SpaceDO as the workspace and file layer, not as git-backed (`docs/llm.md`). Artifacts synchronization lives in `space/src/space/artifacts-sync.ts`.
 
-**Modify Think Agent Behavior:**
-Edit `worker/agents/think/ThinkAgent.ts`, the host behavior in `worker/agents/core/behaviors/think.ts`, and the relevant prompt or skill.
+**Preview runtime.** `@cloudflare/worker-bundler` builds committed files, the `LOADER` Worker Loader binding loads them as a Dynamic Worker, and generated `App` classes run as Durable Object Facets with isolated SQLite.
 
-**Add New WebSocket Message:**
-1. Add type to `worker/api/websocketTypes.ts`
-2. Handle in `worker/agents/core/websocket.ts`
-3. Handle in `src/routes/chat/utils/handle-websocket-message.ts`
+## Model Configuration
+- Think: the model is `THINK_MODEL_ID` / `THINK_MODEL_CONFIG` in `worker/agents/think/model-config.ts`. `ThinkCodingBehavior` converts it to AI Gateway coordinates with `getConfigurationForModel`.
+- Legacy actions: `AGENT_CONFIG` in `worker/agents/inferutils/config.ts` (`PLATFORM_AGENT_CONFIG` when `PLATFORM_MODEL_PROVIDERS` is set, otherwise `DEFAULT_AGENT_CONFIG`). Per-user overrides go through `ModelConfigService`.
 
-**Add New Think Tool:**
-1. Create the tool under `worker/agents/think/`
-2. Add required SpaceDO RPC typing to `space-workspace-ops.ts`
-3. Register it in `ThinkAgent.getTools()`
-4. Update the relevant prompt or skill
-5. Add focused tests
+## User Secrets Vault
+- `UserSecretsStore` (`worker/services/secrets/`) is a per-user Durable Object with a session-bound vault. The vault master key is derived client-side (Argon2id or WebAuthn PRF; `src/lib/vault-crypto.ts`), never stored, and unlocked per WebSocket session. The server persists encrypted blobs only; the header comment in `UserSecretsStore.ts` documents the key model.
+- Server code reads secrets through `SecretsClient`: a locked vault triggers a `vault_required` broadcast and a wait of up to 120 s for the browser to unlock. Missing or undecryptable secrets resolve `null`; an unlock timeout or cancellation throws.
+- Tests: `worker/services/secrets/UserSecretsStore.test.ts`.
 
-**Add API Endpoint:**
-1. Define types in `src/api-types.ts`
-2. Add to `src/lib/api-client.ts`
-3. Create service in `worker/database/services/`
-4. Create controller in `worker/api/controllers/`
-5. Add route in `worker/api/routes/`
-6. Register in `worker/api/routes/index.ts`
+## Cross-Cutting Patterns
 
-## Important Context
-
-**User Secrets Store (Durable Object):**
-- Location: `/worker/services/secrets/`
-- Purpose: Encrypted storage for user API keys with key rotation
-- Architecture: One DO per user, XChaCha20-Poly1305 encryption, SQLite backend
-- Key derivation: MEK → UMK → DEK (hierarchical PBKDF2)
-- Features: Key rotation, soft deletion, access tracking, expiration support
-- RPC Methods: Return `null`/`boolean` on error, never throw exceptions
-- Testing: 90 comprehensive tests in `/test/worker/services/secrets/`
-
-**Workspace and Git:**
-- SpaceDO provides workspace and file operations
-- Cloudflare Artifacts stores durable git history
-- Artifacts synchronization lives in `space/src/space/artifacts-sync.ts`
-- Rollback preserves history by creating a new commit
-
-**Abort Controller Pattern:**
-- `getOrCreateAbortController()` reuses controller for nested operations
+**Abort controller** (`BaseCodingBehavior` in `worker/agents/core/behaviors/base.ts`; legacy inference path, `think.ts` has no abort handling):
+- `getOrCreateAbortController()` reuses the controller for nested operations
 - Cleared after top-level operations complete
-- Shared by parent and nested tool calls
-- User abort cancels entire operation tree
+- Shared by parent and nested tool calls; `cancelCurrentInference()` aborts the whole tree
 
-**Message Deduplication:**
-- Tool execution causes duplicate AI messages
-- Backend skips redundant LLM calls (empty tool results)
-- Frontend utilities deduplicate live and restored messages
-- System prompt teaches LLM not to repeat
+**Message deduplication:**
+- Tool execution causes duplicate assistant messages
+- Legacy path: `UserConversationProcessor` skips a final response that duplicates the last assistant message, and its system prompt teaches the LLM not to repeat
+- Frontend: `src/routes/chat/utils/deduplicate-messages.ts` deduplicates live and restored messages
+
+## Testing Notes
+- Tests run in workerd via `@cloudflare/vitest-pool-workers`. `test/worker-entry.ts` exports only `UserSecretsStore` and an empty `FsHarnessDO` (a real `SqlStorage` for filesystem contract tests), and `wrangler.test.jsonc` binds no D1, KV, or other resources: mock them, and avoid importing modules that load the MCP SDK.
+- Tests are colocated with source (`*.test.ts` beside the module); `space/test` and `sdk/test` hold their packages' tests.
+
+## Tooling and Build Gotchas
+- Commits are checked by commitlint (Conventional Commits: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`; no trailing period in the subject).
+- `bun run knip` reports unused files, exports, and dependencies (rules are `error`).
+- `bun run cli` and `bun run tui` point at a gitignored `cli/` directory that is not in this checkout.
+- `package.json` requires Node >= 22 (the README says 18+).
+- `.editorconfig` and Prettier specify tabs and single quotes, but several older worker files use 4 spaces; match the file being edited.
+- The root app imports `@space-do/space` from `space/dist`, so run `bun run --cwd space build` after editing `space/src`.
+- CommonJS `require()` inside code-split Worker chunks crashes startup (deploy error 10021). `vite.config.ts` aliases `mimetext` and `safe-buffer` for this; use the same approach for similar packages.
+- `packages/artifacts-viewer` is aliased in both `vite.config.ts` (Vite) and `wrangler.jsonc` `alias` (esbuild during `wrangler deploy`); change both when remapping its entrypoints.
+- `wrangler.jsonc` sets `keep_vars: true`: feature toggles are set in the Cloudflare dashboard or `.dev.vars`, not committed there. Markdown imports (Think skills) rely on the `?raw` Text rule in `wrangler.jsonc`.
+
+## Docs
+- `docs/llm.md`: only the sections above "Legacy reference" are current; the remainder documents the retired phase-based sandbox architecture.
+- `docs/setup.md`: full setup, custom domain, AI Gateway, dashboard-managed feature toggles, and troubleshooting.
 
 ## Core Rules (Non-Negotiable)
 
