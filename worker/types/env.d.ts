@@ -19,7 +19,6 @@ declare namespace Cloudflare {
 		CF_ACCESS_ID: string;
 		CF_ACCESS_SECRET: string;
 		CF_OAUTH_ENCRYPTION_KEY: string;
-		CLOUDFLARE_ACCOUNT_ID: string;
 		CLOUDFLARE_AI_GATEWAY_TOKEN: string;
 		CLOUDFLARE_AI_GATEWAY_URL: string;
 		CLOUDFLARE_API_TOKEN: string;

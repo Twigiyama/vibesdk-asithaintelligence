@@ -82,31 +82,23 @@
 		"binding": "BROWSER",
 		"remote": true
 	},
-    "dispatch_namespaces": [
-        {
-            "binding": "DISPATCHER",
-            "namespace": "vibesdk-default-namespace",
-            "remote": true
-        }
-    ],
-    "artifacts": [
-        {
-            "binding": "ARTIFACTS",
-            "namespace": "vibesdk-production"
-        }
-    ],
+    // No `dispatch_namespaces` or `artifacts` binding. This account has no Workers
+    // for Platforms and no Artifacts namespace, so either binding would be rejected on
+    // upload; spaces keep their git history in SQLite while ENABLE_ARTIFACTS is unset.
+    // .github/deploy.config.json asserts that both stay absent.
 	"containers": [
 		{
 			"class_name": "UserAppSandboxService",
-			"image": "./SandboxDockerfile",
-            // "image": "registry.cloudflare.com/vibesdk-production-userappsandboxservice:cfe197fc",
-            // Altering max_instances value will have no effect. Please use the MAX_SANDBOX_INSTANCES var instead.
-			"max_instances": 1400,
-            // ATTENTION: Altering instance_type value will have no effect. Please use the SANDBOX_INSTANCE_TYPE var instead.
+            // Pinned to the live application, so a deploy never builds an image or starts a
+            // rollout. max_instances, instance_type and rollout_step_percentage must equal the
+            // live application for the same reason (docs/ci-cd.md); a new image is an
+            // out-of-band step.
+			"image": "registry.cloudflare.com/2739b4237e2dd71f82e3c3c0280a9573/vibesdk-asithaintelligence-userappsandboxservice:db6d8cfb",
+			"max_instances": 10,
             "instance_type": {
-                "vcpu": 4,
+                "vcpu": 2,
                 "memory_mib": 8192,
-                "disk_mb": 10240
+                "disk_mb": 16000
             },
             "rollout_step_percentage": 100,
 			"ssh": {
@@ -205,21 +197,17 @@
 	],
 	"routes": [
         {
-            "pattern": "build.cloudflare.dev",
-            "custom_domain": true
-        },
-        {
-            "pattern": "*build-preview.cloudflare.dev/*",
-            "custom_domain": false,
-            "zone_id": "db01fac4261b2604aacad8410443a3e2"
+            // One wildcard route serves the apex and the preview subdomains of CUSTOM_DOMAIN.
+            "pattern": "*asithaintelligence.com/*",
+            "zone_id": "9fbcad10bd68c0e2f8008b6d09f8949c"
         }
     ],
 	"vars": {
         "TEMPLATES_REPOSITORY": "https://github.com/cloudflare/vibesdk-templates",
         "DISPATCH_NAMESPACE": "vibesdk-default-namespace",
         "CLOUDFLARE_AI_GATEWAY": "vibesdk-gateway",
-        // Cloudflare Artifacts namespace for the read-only Repo viewer proxy.
-        // Must match the `artifacts` binding namespace above.
+        // Artifacts namespace for the read-only Repo viewer proxy. Only used when
+        // ENABLE_ARTIFACTS is on, which also needs an `artifacts` binding for it.
         "ARTIFACTS_NAMESPACE": "vibesdk-production",
         "PLATFORM_CAPABILITIES": {
             "features": {
@@ -236,6 +224,9 @@
             "version": "1.0.0"
         },
         "CUSTOM_DOMAIN": "asithaintelligence.com",
+        "ENVIRONMENT": "production",
+        // Builds the AI Gateway URL and the Cloudflare API calls. An identifier, not a credential.
+        "CLOUDFLARE_ACCOUNT_ID": "2739b4237e2dd71f82e3c3c0280a9573",
         "MAX_SANDBOX_INSTANCES": "10",
         "SANDBOX_INSTANCE_TYPE": "standard-3",
         "DEV_BROWSER_SIDECAR_URL": "http://127.0.0.1:9223",

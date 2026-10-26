@@ -84,6 +84,15 @@ describe('deployConfigSchema', () => {
 		expect(deployConfigSchema.parse({ workerName: 'w' }).enforce).toBe(false);
 		expect(deployConfigSchema.parse({ workerName: 'w', enforce: true }).enforce).toBe(true);
 	});
+
+	it('lets the dispatch and Artifacts namespaces be declared absent', () => {
+		const parsed = deployConfigSchema.parse({
+			workerName: 'w',
+			resources: { dispatchNamespace: null, artifactsNamespace: null },
+		});
+
+		expect(parsed.resources).toEqual({ dispatchNamespace: null, artifactsNamespace: null });
+	});
 });
 
 describe('verifyWranglerConfig', () => {
@@ -297,6 +306,22 @@ describe('verifyWranglerConfig', () => {
 			const { artifacts: _artifacts, ...rest } = valid();
 
 			expect(rules(rest)).toEqual(['resource-id']);
+		});
+
+		it('flags a dispatch namespace binding when the account has none', () => {
+			const resources = { ...expected.resources, dispatchNamespace: null };
+			const findings = verifyWranglerConfig(valid(), { ...expected, resources });
+
+			expect(findings.map((finding) => finding.message)).toEqual([
+				expect.stringContaining('Workers for Platforms'),
+			]);
+		});
+
+		it('accepts no dispatch namespace binding when none is expected', () => {
+			const { dispatch_namespaces: _dispatch, ...rest } = valid();
+			const resources = { ...expected.resources, dispatchNamespace: null };
+
+			expect(rules(rest, { resources })).toEqual([]);
 		});
 
 		it('skips values the deploy config does not declare', () => {
