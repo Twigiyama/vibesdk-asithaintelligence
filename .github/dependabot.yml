@@ -3,6 +3,12 @@ version: 2
 # Bun support covers version updates only; `bun audit` in CI is the
 # vulnerability gate. SandboxDockerfile is not tracked: Dependabot only
 # recognises files named Dockerfile.
+#
+# Major versions are ignored for the bun ecosystems: they need code changes and
+# a decision, so they are taken deliberately (`bun update --latest <name>` in a
+# pull request) instead of arriving as a weekly pull request that fails CI.
+# Groups are matched in order, so the catch-all comes last. A bad bump then
+# fails only its own group's pull request.
 updates:
   - package-ecosystem: bun
     directory: /
@@ -11,11 +17,62 @@ updates:
       day: monday
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 8
     commit-message:
       prefix: build
       include: scope
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
+      cloudflare:
+        patterns: ['@cloudflare/*', 'wrangler', 'agents', 'partysocket']
+        update-types: [minor, patch]
+      ai:
+        patterns: ['@ai-sdk/*', 'openai']
+        update-types: [minor, patch]
+      frontend:
+        patterns:
+          - 'react'
+          - 'react-*'
+          - '@radix-ui/*'
+          - '@tanstack/*'
+          - '@phosphor-icons/*'
+          - '@tailwindcss/*'
+          - 'tailwindcss'
+          - 'tw-animate-css'
+          - 'lucide-react'
+          - 'framer-motion'
+          - 'recharts'
+          - 'sonner'
+          - 'vaul'
+          - 'cmdk'
+          - 'embla-carousel-react'
+          - 'class-variance-authority'
+          - 'monaco-editor'
+        update-types: [minor, patch]
+      tooling:
+        patterns:
+          - 'eslint*'
+          - '@eslint/*'
+          - 'typescript'
+          - 'typescript-eslint'
+          - 'vite'
+          - 'vite-*'
+          - '@vitejs/*'
+          - 'vitest'
+          - '@vitest/*'
+          - '@types/*'
+          - '@commitlint/*'
+          - 'prettier-*'
+          - 'drizzle-kit'
+          - 'esbuild'
+          - 'globals'
+          - 'husky'
+          - 'jest'
+          - 'knip'
+          - 'tsx'
+        update-types: [minor, patch]
       minor-and-patch:
         update-types: [minor, patch]
 
@@ -30,6 +87,9 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
         update-types: [minor, patch]
