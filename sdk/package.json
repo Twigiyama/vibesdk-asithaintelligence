@@ -31,7 +31,7 @@
 		"dts-bundle-generator": "^9.5.1",
 		"miniflare": "^4.20260730.0",
 		"puppeteer": "^24.8.0",
-		"typescript": "^5.9.3",
+		"typescript": "^7.0.2",
 		"wrangler": "^4.151.1"
 	}
 }
