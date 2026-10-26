@@ -26,7 +26,7 @@
 		"package": "bun run typecheck && bun run test && bun run build && bun run bundle-types"
 	},
 	"devDependencies": {
-		"@cloudflare/workers-types": "^4.20241218.0",
+		"@cloudflare/workers-types": "^5.20261019.1",
 		"@types/node": "^25.0.3",
 		"dts-bundle-generator": "^9.5.1",
 		"miniflare": "^4.20260730.0",
