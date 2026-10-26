@@ -82,7 +82,7 @@ An app session spans three Durable Objects. The browser opens a WebSocket (`/api
 - Commits are checked by commitlint (Conventional Commits: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`; no trailing period in the subject).
 - `bun run knip` reports unused files, exports, and dependencies (rules are `error`).
 - `bun run cli` and `bun run tui` point at a gitignored `cli/` directory that is not in this checkout.
-- `package.json` requires Node >= 22 (the README says 18+).
+- `package.json` requires Node >= 22.
 - `.editorconfig` and Prettier specify tabs and single quotes, but several older worker files use 4 spaces; match the file being edited.
 - The root app imports `@space-do/space` from `space/dist`, so run `bun run --cwd space build` after editing `space/src`.
 - CommonJS `require()` inside code-split Worker chunks crashes startup (deploy error 10021). `vite.config.ts` aliases `mimetext` and `safe-buffer` for this; use the same approach for similar packages.
