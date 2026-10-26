@@ -5,7 +5,7 @@
  * Workers for Platforms functionality across the application.
  */
 
-export function isDispatcherAvailable(env: Env): boolean {
+export function isDispatcherAvailable(env: Env): env is Env & { DISPATCHER: DispatchNamespace } {
     // Check if DISPATCHER binding exists in the environment
     // This will be false if dispatch_namespaces is commented out in wrangler.jsonc
     // or if Workers for Platforms is not enabled for the account (as binding would be removed by the deploy.ts script)

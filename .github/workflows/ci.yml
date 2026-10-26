@@ -93,8 +93,8 @@ jobs:
       - name: Build
         run: bun run build
 
-      # Advisory until .github/deploy.config.json declares the production
-      # resources, then blocking. See docs/ci-cd.md.
+      # Blocking: .github/deploy.config.json declares the production identity and
+      # sets enforce. See docs/ci-cd.md.
       - name: Wrangler config guard
         id: config-guard
         run: bun scripts/ci/verify-wrangler-config.ts wrangler.jsonc dist/*/wrangler.json

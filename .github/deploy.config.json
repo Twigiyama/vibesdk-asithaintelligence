@@ -1,6 +1,18 @@
 {
-	"$comment": "Production identity checked by scripts/ci/verify-wrangler-config.ts against wrangler.jsonc and the generated dist/<worker>/wrangler.json. Add zoneIds and resources (D1, KV, R2, namespaces) with the values from the live account when the config is re-homed; omitted values are not compared. Set enforce to true in the same change: until then pull request CI reports findings as warnings (deploys always enforce). See docs/ci-cd.md.",
-	"enforce": false,
+	"$comment": "Production identity checked by scripts/ci/verify-wrangler-config.ts against wrangler.jsonc and the generated dist/<worker>/wrangler.json. Values omitted here are not compared; null asserts that a binding does not exist. Deploys always enforce; enforce makes pull request CI fail on findings too. See docs/ci-cd.md.",
+	"enforce": true,
 	"workerName": "vibesdk-asithaintelligence",
-	"forbiddenHostSuffixes": ["cloudflare.dev"]
+	"forbiddenHostSuffixes": ["cloudflare.dev"],
+	"zoneIds": ["9fbcad10bd68c0e2f8008b6d09f8949c"],
+	"resources": {
+		"d1": {
+			"binding": "DB",
+			"databaseName": "vibesdk-db",
+			"databaseId": "e1a508b4-3e11-4db4-83f3-004b562a83f3"
+		},
+		"kv": [{ "binding": "VibecoderStore", "id": "d2f2360aab6a408698c7c84591c2b5b4" }],
+		"r2": [{ "binding": "TEMPLATES_BUCKET", "bucketName": "vibesdk-templates" }],
+		"dispatchNamespace": null,
+		"artifactsNamespace": null
+	}
 }

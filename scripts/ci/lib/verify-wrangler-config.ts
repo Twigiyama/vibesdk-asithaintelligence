@@ -111,7 +111,8 @@ export const deployConfigSchema = z.looseObject({
 					}),
 				)
 				.optional(),
-			dispatchNamespace: z.string().optional(),
+			/** A string pins the namespace; null requires that no binding exists. */
+			dispatchNamespace: z.string().nullable().optional(),
 			/** A string pins the namespace; null requires that no binding exists. */
 			artifactsNamespace: z.string().nullable().optional(),
 		})
@@ -279,7 +280,13 @@ function checkResources(config: WranglerConfig, expected: DeployConfig) {
 		}
 	}
 
-	if (resources.dispatchNamespace !== undefined) {
+	if (resources.dispatchNamespace === null) {
+		if ((config.dispatch_namespaces ?? []).length > 0) {
+			mismatch(
+				'A dispatch namespace binding is configured, but this account has no Workers for Platforms; the upload would be rejected.',
+			);
+		}
+	} else if (resources.dispatchNamespace !== undefined) {
 		const bindings = config.dispatch_namespaces ?? [];
 		if (bindings.length === 0) {
 			mismatch('No dispatch namespace binding is configured.');

@@ -15,8 +15,8 @@ There is one environment, production. The only deployer is GitHub Actions. `scri
 | | Migration guard | Yes |
 | | Knip | No (report only) |
 | `build` | `bun run build` | Yes |
-| | Wrangler config guard | Only when `enforce` is true in `.github/deploy.config.json` |
-| | `wrangler deploy --dry-run` | Yes, but runs only when the config guard reports no findings |
+| | Wrangler config guard | Yes (`enforce` is true in `.github/deploy.config.json`) |
+| | `wrangler deploy --dry-run` | Yes. It needs no credentials and no Docker, because the container image is a registry reference |
 | `sdk` | `sdk/` install, typecheck, tests, build, bundled types | Yes |
 | `security` | gitleaks over the pull request commits | Yes |
 | | actionlint and zizmor over `.github/` | Yes |
@@ -29,15 +29,14 @@ Run the blocking checks locally with `bun run verify` (see [development.md](deve
 
 ### Report-only checks and how they ratchet
 
-Three checks start non-blocking because the repository was not clean when CI was added. Each has one switch:
+Two checks are still non-blocking because the repository was not clean when CI was added. Each has one switch:
 
 | Check | At adoption | Becomes blocking when |
 | --- | --- | --- |
 | Knip | 72 unused files, 24 unused dependencies, 83 unused exports, 111 unused exported types | Findings are cleared; remove `continue-on-error` on the Knip step |
 | `bun audit` | 168 advisories (5 critical, 72 high); 125 in production dependencies | `bun audit --audit-level high` is clean; remove `continue-on-error` on the audit step |
-| Wrangler config guard | The committed `wrangler.jsonc` still holds the upstream template's hostnames, resource ids and a Dockerfile container image | `wrangler.jsonc` is re-homed to this account's resources; set `"enforce": true` in `.github/deploy.config.json` in the same change |
 
-The dry run is skipped, not failed, while the config guard has findings: with a `Dockerfile` image path wrangler would build the sandbox image on the runner. Once the image is pinned to a `registry.cloudflare.com/` reference the dry run needs no Docker and no credentials.
+The Wrangler config guard started as a third report-only check, while `wrangler.jsonc` still held the upstream template's hostnames, resource ids and a Dockerfile container image. It became blocking when `wrangler.jsonc` was re-homed to this account's resources and `"enforce": true` was set in `.github/deploy.config.json` in the same change.
 
 ### Baseline at adoption
 
@@ -171,7 +170,7 @@ Nothing deploys automatically. Complete these in order; each Cloudflare write is
 1. **Disconnect Cloudflare Workers Builds, if it is connected.** A Workers Builds trigger on this repository shows up as a `Workers Builds: <worker>` check run on every push, and a merge to `main` would then start a production build that runs the template's `scripts/deploy.ts`, which mints a new `JWT_SECRET` and uploads a broad token as the runtime token. In the dashboard, open the Worker, Settings, Builds, and disconnect (note the commands and root directory first). A trigger can outlive its Worker: if the check keeps appearing for a Worker you have deleted, remove this repository from the Cloudflare Workers & Pages GitHub App's repository access instead (GitHub, Settings, Applications). To confirm, push a throwaway branch and look for a check from `cloudflare-workers-and-pages` on its commit; delete the branch afterwards. The deploy workflow refuses to deploy a commit that has the check run. A commit keeps it after you disconnect, so merge only after disconnecting; to return to a version built earlier use `rollback.yml`, not `deploy.yml`.
 2. **Check that the Worker exists.** This repository deploys `vibesdk-asithaintelligence`. The preflight in the next step reports a missing Worker. If it does not exist yet, the first deploy is a bootstrap: the D1 database, KV namespace, R2 bucket, dispatch namespace, AI Gateway and templates must exist first, and the container image needs a one-time push from a machine with Docker so its registry reference can be pinned.
 3. **Collect the live state.** Build (`bun run build`), then run `bun scripts/ci/preflight.ts --config dist/<worker>/wrangler.json --report` with a read-only API token in `CLOUDFLARE_API_TOKEN` and the account in `CLOUDFLARE_ACCOUNT_ID`. It prints the live bindings, migration tag, secret names and recent deployments next to the findings, and reads no value. It does not use the `wrangler login` session.
-4. **Re-home `wrangler.jsonc`.** Replace the template's routes, zone, `CUSTOM_DOMAIN`, D1, KV, R2, dispatch namespace and container image with this account's values, move the variables listed as "not secrets" above into `vars`, regenerate the Worker types, fill `zoneIds` and `resources` in `.github/deploy.config.json`, and set `"enforce": true`.
+4. **Re-home `wrangler.jsonc`** (done; see the guard rules below). Replace the template's routes, zone, `CUSTOM_DOMAIN`, D1, KV, R2, dispatch namespace and container image with this account's values, move the variables listed as "not secrets" above into `vars`, regenerate the Worker types, fill `zoneIds` and `resources` in `.github/deploy.config.json`, and set `"enforce": true`. This account has no Workers for Platforms and no Artifacts namespace, so the `dispatch_namespaces` and `artifacts` bindings are left out and the deploy config asserts that with `null`; wrangler would reject the upload with either binding.
 5. **Delete the live secrets that collide with committed `vars`** (the sync and the preflight both refuse them).
 6. **Set the environment** (`scripts/ops/configure-github.sh`, then `gh secret set --env production` for `CLOUDFLARE_API_TOKEN` and `WORKER_SECRETS`, and `gh variable set --env production` for `CLOUDFLARE_ACCOUNT_ID` and `WORKER_NAME`). Run `sync-secrets` as a dry run, then for real.
 7. **Deploy once by hand** (`gh workflow run deploy.yml -f ref=main`), confirm the smoke checks pass and the new version carries the SHA tag, then register and sign in by hand.
@@ -238,7 +237,7 @@ CI checks both `wrangler.jsonc` and the generated `dist/<worker>/wrangler.json`,
 | `container-instances` | `max_instances` exceeds `MAX_SANDBOX_INSTANCES`, or that var is not a positive integer |
 | `migration-tags` | Durable Object migration tags are not strictly ascending `v<number>` values |
 
-Values omitted from `.github/deploy.config.json` are not compared. `"artifactsNamespace": null` asserts that no Artifacts binding exists.
+Values omitted from `.github/deploy.config.json` are not compared. `"dispatchNamespace": null` and `"artifactsNamespace": null` assert that no such binding exists. Without Workers for Platforms, generated apps cannot be published to the platform's dispatch namespace (`worker/agents/core/behaviors/think.ts`, `deployThinkAppToPlatform`); the `ENABLE_USER_ACCOUNT_DEPLOY` dashboard toggle deploys them to each user's own account instead.
 
 ## Supply chain
 
