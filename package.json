@@ -118,7 +118,7 @@
 		"mdast-util-to-string": "^4.0.0",
 		"monaco-editor": "^0.56.0",
 		"nanoid": "^5.1.6",
-		"openai": "^5.23.2",
+		"openai": "^7.39.0",
 		"ora": "^9.0.0",
 		"partysocket": "^1.1.6",
 		"react": "^19.2.3",
