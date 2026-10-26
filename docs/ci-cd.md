@@ -94,7 +94,7 @@ The wrangler deploy does not pass `--containers-rollout`: wrangler 4.90 only acc
 
 ### Dry run
 
-`gh workflow run deploy.yml -f ref=main -f dry_run=true` runs the steps above through the preflight and the pending migration guard, then writes nothing: no restore point, no migration, no upload. Instead it runs `wrangler deploy --dry-run` (bundles and validates the upload), `wrangler d1 migrations list --remote` (the pending migrations as wrangler sees them) and the smoke checks from the runner against the live Worker. The smoke result is informational: a failure shows in the job summary without failing the run.
+`gh workflow run deploy.yml -f ref=main -f dry_run=true` runs the steps above through the preflight and the pending migration guard, then writes nothing: no restore point, no migration, no upload. Instead it runs `wrangler deploy --dry-run` (bundles and validates the upload) and the smoke checks from the runner against the live Worker. The smoke result is informational: a failure shows in the job summary without failing the run. The pending migrations are the preflight's, read with a plain `SELECT`; `wrangler d1 migrations list` is not used because it creates the migrations table when it is missing.
 
 Use it before the first deploy and after changing the CI token's permissions: it proves the token's read access, the configuration and the pending migrations. A Cloudflare bot challenge on the runner's addresses shows up in its smoke output as `cf-mitigated: challenge`.
 
