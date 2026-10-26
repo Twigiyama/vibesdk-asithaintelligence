@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
 	checkMigrations,
+	checkPendingMigrations,
 	findDestructiveStatements,
 	maskSql,
+	parsePendingNames,
 	type MigrationChange,
 } from './check-migrations';
 
@@ -213,5 +215,69 @@ describe('checkMigrations', () => {
 				message: expect.stringContaining('could not be read'),
 			},
 		]);
+	});
+});
+
+describe('parsePendingNames', () => {
+	it('splits a comma separated list and drops blank entries', () => {
+		expect(parsePendingNames('0000_a.sql, 0001_b.sql,,')).toEqual(['0000_a.sql', '0001_b.sql']);
+	});
+
+	it('returns nothing for an empty value', () => {
+		expect(parsePendingNames('')).toEqual([]);
+	});
+
+	it.each(['../etc/passwd', 'a/b.sql', 'notes.txt', '..\\x.sql', '.sql'])(
+		'rejects %s, which is not a migration file name',
+		(name) => {
+			expect(() => parsePendingNames(`0000_a.sql,${name}`)).toThrow(/not a migration file name/);
+		},
+	);
+});
+
+describe('checkPendingMigrations', () => {
+	const create = { name: '0000_create.sql', sql: 'CREATE TABLE `a` (`id` integer);' };
+	const dropColumn = { name: '0001_drop.sql', sql: 'ALTER TABLE `a` DROP COLUMN `b`;' };
+	const dropTable = {
+		name: '0004_rebuild.sql',
+		sql: 'CREATE TABLE `c` (`id` integer);\n--> statement-breakpoint\nDROP TABLE `a`;',
+	};
+
+	it('reports nothing when every pending migration is additive', () => {
+		expect(checkPendingMigrations([create], { allowDestructive: false })).toEqual([]);
+	});
+
+	it('reports a destructive statement with its file and line', () => {
+		const findings = checkPendingMigrations([create, dropTable], { allowDestructive: false });
+
+		expect(findings).toEqual([
+			{
+				path: 'migrations/0004_rebuild.sql',
+				rule: 'destructive',
+				line: 3,
+				message: expect.stringContaining('DROP TABLE `a`'),
+			},
+		]);
+	});
+
+	it('points at the manual input that allows it', () => {
+		const [finding] = checkPendingMigrations([dropColumn], { allowDestructive: false });
+
+		expect(finding.message).toContain('allow_destructive');
+	});
+
+	it('orders findings by file and then line', () => {
+		const findings = checkPendingMigrations([dropTable, dropColumn], { allowDestructive: false });
+
+		expect(findings.map((finding) => finding.path)).toEqual([
+			'migrations/0001_drop.sql',
+			'migrations/0004_rebuild.sql',
+		]);
+	});
+
+	it('reports nothing when destructive statements are allowed', () => {
+		expect(
+			checkPendingMigrations([dropColumn, dropTable], { allowDestructive: true }),
+		).toEqual([]);
 	});
 });

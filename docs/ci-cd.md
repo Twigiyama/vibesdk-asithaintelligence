@@ -67,7 +67,9 @@ gh workflow run deploy.yml -f ref=main
 | Input | Meaning |
 | --- | --- |
 | `ref` | Commit to deploy. It must be an ancestor of `origin/main`. |
+| `dry_run` | Check everything, then stop before any write. See [Dry run](#dry-run). |
 | `skip_migrations` | Do not apply D1 migrations. Only for migrations that were applied by hand. |
+| `allow_destructive` | Allow pending D1 migrations that drop or rename data. Review them first. |
 | `allow_missing_worker` | Allow the first deploy of a Worker that does not exist yet. |
 
 Runs share one concurrency group (`deploy-production`) with `sync-secrets` and `rollback`, and are never cancelled midway. GitHub keeps one waiting run per group: if one run is active and one is already waiting, a third replaces the waiting one. After triggering a rollback during a deploy, check the Actions tab that it is still queued.
@@ -80,14 +82,21 @@ Every one of the three workflows first checks that the `production` environment 
    1. Check `wrangler.jsonc` against `.github/deploy.config.json`, always enforced.
    2. Build, then check the generated `dist/<worker>/wrangler.json`, which is what gets uploaded.
    3. **Preflight** (`scripts/ci/preflight.ts`) compares that configuration with the live Worker and stops on drift: a binding that points at another resource, a live binding the config would remove, a secret that shares a name with a committed var, a Durable Object migration tag the config does not know (wrangler would replay migrations), or D1 migrations recorded in the database but missing from the repository. It also records the version serving traffic now, which is where an automatic rollback goes.
-   4. Record a D1 Time Travel bookmark.
-   5. Apply pending D1 migrations. They run before the code uploads, which is why the migration guard keeps them additive.
-   6. `wrangler deploy --tag <first 12 characters of the SHA> --message <commit subject>`.
-   7. **Smoke checks** (`scripts/ci/smoke.ts`) against `CUSTOM_DOMAIN`, retried for about a minute each: `/api/health` is `{"status":"ok"}`, `/api/capabilities` lists features (the shipped vars), `/api/apps/public?limit=1` succeeds (a D1 query, unauthenticated), and `/` serves HTML (the assets).
-   8. If a smoke check failed, decide on a rollback, then fail the run.
-   9. A job summary lists the commit, Worker version, restore point and outcomes.
+   4. **Pending migration guard** (`scripts/ci/check-pending-migrations.ts`) reads the SQL of every migration the preflight reports as pending and fails on a destructive statement (see the migration guard below) unless `allow_destructive` is set. The pull request guard only sees what a pull request adds; this one also covers history and anything merged past the label.
+   5. Record a D1 Time Travel bookmark.
+   6. Apply pending D1 migrations. They run before the code uploads, which is why the migration guard keeps them additive.
+   7. `wrangler deploy --tag <first 12 characters of the SHA> --message <commit subject>`. Wrangler can fail after the new version is already live (routes, containers), so a failure here does not skip the next steps.
+   8. **Smoke checks** (`scripts/ci/smoke.ts`) against `CUSTOM_DOMAIN`, retried for about a minute each: `/api/health` is `{"status":"ok"}`, `/api/capabilities` lists features (the shipped vars), `/api/apps/public?limit=1` succeeds (a D1 query, unauthenticated), and `/` serves HTML (the assets).
+   9. If the deploy step or a smoke check failed, decide on a rollback, then fail the run.
+   10. A job summary lists the commit, Worker version, restore point and outcomes.
 
 The wrangler deploy does not pass `--containers-rollout`: wrangler 4.90 only accepts `immediate` or `gradual`, and there is no way to say "none". Instead the container `image` in `wrangler.jsonc` is pinned to the live registry reference, so a deploy leaves the container application unchanged. Keep `max_instances`, `instance_type` and `rollout_step_percentage` equal to the live application for the same reason. `--strict` is not used: what it blocks is undocumented and unverified.
+
+### Dry run
+
+`gh workflow run deploy.yml -f ref=main -f dry_run=true` runs the steps above through the preflight and the pending migration guard, then writes nothing: no restore point, no migration, no upload. Instead it runs `wrangler deploy --dry-run` (bundles and validates the upload) and the smoke checks from the runner against the live Worker. The smoke result is informational: a failure shows in the job summary without failing the run. The pending migrations are the preflight's, read with a plain `SELECT`; `wrangler d1 migrations list` is not used because it creates the migrations table when it is missing.
+
+Use it before the first deploy and after changing the CI token's permissions: it proves the token's read access, the configuration and the pending migrations. A Cloudflare bot challenge on the runner's addresses shows up in its smoke output as `cf-mitigated: challenge`.
 
 ### Automatic rollback
 
@@ -99,8 +108,9 @@ A failed smoke check rolls back automatically only when the release left the dat
 | Applied D1 migrations | Fail and leave recovery to a person: D1 is forward-only and the old version was not tested against the new schema |
 | Applied a Durable Object migration | Fail: Cloudflare blocks rolling back across a class change |
 | No previous version recorded | Fail |
+| The deploy step failed | The smoke checks still run. If they fail too, fail and leave the decision to a person: it is not known which version serves |
 
-The run always ends failed when smoke checks fail, even after a successful rollback.
+The run always ends failed when the deploy step or the smoke checks fail, even after a successful rollback.
 
 ## Rollback
 
@@ -159,7 +169,7 @@ By name. Which of these the deployment needs depends on the features enabled.
 | CI deploy token | GitHub environment secret `CLOUDFLARE_API_TOKEN` on `production`, passed only to the steps that call Cloudflare | One account and one zone. |
 | Account id and Worker name | GitHub environment variables `CLOUDFLARE_ACCOUNT_ID` and `WORKER_NAME` | Not secret. Every script refuses to act when `WORKER_NAME` differs from the name in the configuration. |
 | Worker runtime secrets | GitHub environment secret `WORKER_SECRETS` | Pushed by `sync-secrets` only. |
-| Worker runtime Cloudflare token | A key inside `WORKER_SECRETS` | Workers Scripts: Edit, AI Gateway: Run and Read, Browser Rendering: Edit, Account Analytics: Read. No zone, DNS, D1, KV, R2, container or Builds access. |
+| Worker runtime Cloudflare token | A key inside `WORKER_SECRETS` | What the Worker code calls with it: AI Gateway (Run, Read), Browser Rendering (Edit), Account Analytics (Read, GraphQL), Workers Scripts (Edit: the deployer uploads generated apps and manages their subdomain), and for the features that use them Workers KV Storage and D1 (Edit: `resourceProvisioner`), Cloudflare Images (Edit) and Artifacts (Read: `ARTIFACTS_API_TOKEN` is preferred when set). No zone, DNS, R2, container or Builds access. Find the calls with `grep -rn api.cloudflare.com worker/`, and narrow the token only after every enabled feature has been exercised with the narrower one. |
 | Local and agent access | `wrangler login` (OAuth), minimal scopes | Never stored in GitHub, never shared with the deploy token. |
 
 The CI deploy token starts from the list in [setup.md](setup.md#cloudflare-account-information), with Workers Routes: Edit narrowed to the one zone. Prune it after the first green deploy: remove one permission at a time and re-run the preflight, then record the permissions that remain here.
@@ -174,8 +184,8 @@ Nothing deploys automatically. Complete these in order; each Cloudflare write is
 4. **Re-home `wrangler.jsonc`.** Replace the template's routes, zone, `CUSTOM_DOMAIN`, D1, KV, R2, dispatch namespace and container image with this account's values, move the variables listed as "not secrets" above into `vars`, regenerate the Worker types, fill `zoneIds` and `resources` in `.github/deploy.config.json`, and set `"enforce": true`.
 5. **Delete the live secrets that collide with committed `vars`** (the sync and the preflight both refuse them).
 6. **Set the environment** (`scripts/ops/configure-github.sh`, then `gh secret set --env production` for `CLOUDFLARE_API_TOKEN` and `WORKER_SECRETS`, and `gh variable set --env production` for `CLOUDFLARE_ACCOUNT_ID` and `WORKER_NAME`). Run `sync-secrets` as a dry run, then for real.
-7. **Deploy once by hand** (`gh workflow run deploy.yml -f ref=main`), confirm the smoke checks pass and the new version carries the SHA tag, then register and sign in by hand.
-8. **Exercise the rollback** while there are no users, then deploy forward again.
+7. **Dry run, then deploy once by hand.** Run `gh workflow run deploy.yml -f ref=main -f dry_run=true` first and fix what it reports, then `gh workflow run deploy.yml -f ref=main`. Confirm the smoke checks pass and the new version carries the SHA tag, then register and sign in by hand.
+8. **Exercise the rollback** while there are no users, then deploy forward again. Do it between two releases that applied no migrations: a rollback past a release that did would cross its D1 and Durable Object migrations. Check that the rollback deployment is recorded as a rollback (`triggered_by` is `rollback`), because `sync-secrets` relies on that.
 
 ## Deploying on every merge (the last step)
 
@@ -216,9 +226,15 @@ D1 migrations are applied before the new code deploys, so each new migration has
 - An existing migration that is modified, renamed or deleted always fails: applied migrations are immutable.
 - A new migration containing `DROP TABLE|COLUMN|INDEX|VIEW|TRIGGER`, `RENAME TO|COLUMN`, `DELETE FROM` or `TRUNCATE` fails unless the pull request carries the `destructive-migration` label. Comments and string literals are ignored. drizzle's table-rebuild pattern (`DROP TABLE` then `RENAME TO`) is flagged on purpose.
 
-The historical migrations, including both `0006_*` files, contain such statements and are never rescanned.
+The historical migrations `0001`, `0002` and `0004` contain such statements (two dropped columns, two dropped tables and a table rebuild). The pull request guard never rescans them; the pending migration guard below reads them whenever they are pending.
 
 The guard catches the common ways a migration breaks the release still serving traffic; it cannot prove a migration is compatible. Review the additive ones too: a new `NOT NULL` column needs a default (SQLite refuses one without, so that fails loudly), and a new unique index must not reject inserts the running release makes.
+
+### Pending migration guard
+
+`bun scripts/ci/check-pending-migrations.ts --pending <name,name,...> [--dir migrations] [--allow-destructive]`
+
+The deploy runs this with the names the preflight reports as pending. It applies the same destructive-statement rules as the migration guard to the files themselves, so it does not depend on a pull request or its label: a release merged past the label, or a database that is behind, still stops here. A deploy that must apply such a migration is run by hand with `allow_destructive`, after reading the SQL and, when the tables hold data, noting the restore point.
 
 ### Wrangler config guard
 

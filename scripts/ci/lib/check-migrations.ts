@@ -1,5 +1,5 @@
 /**
- * Pull-request guard for D1 migrations.
+ * Guards for D1 migrations, on pull requests and at deploy time.
  *
  * Migrations are applied before the new Worker code is deployed, so every new
  * migration has to be safe for the release that is still serving traffic.
@@ -8,6 +8,7 @@
  */
 
 const MIGRATION_PATH = /^migrations\/[^/]+\.sql$/;
+const MIGRATION_FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*\.sql$/;
 
 const DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
 	/\bDROP\s+(?:TABLE|COLUMN|INDEX|VIEW|TRIGGER)\b/i,
@@ -179,4 +180,49 @@ export function checkMigrations(
 	return findings.sort(
 		(a, b) => a.path.localeCompare(b.path) || (a.line ?? 0) - (b.line ?? 0),
 	);
+}
+
+export interface PendingMigration {
+	name: string;
+	sql: string;
+}
+
+/** Parses a comma separated list of migration file names; anything but a plain `.sql` name is rejected. */
+export function parsePendingNames(raw: string): string[] {
+	const names = raw
+		.split(',')
+		.map((name) => name.trim())
+		.filter(Boolean);
+
+	for (const name of names) {
+		if (!MIGRATION_FILE_NAME.test(name)) {
+			throw new Error(`${JSON.stringify(name)} is not a migration file name.`);
+		}
+	}
+	return names;
+}
+
+/**
+ * Deploy-time guard. The pull-request guard only sees what a pull request adds;
+ * this one reads the migrations a deploy is about to apply to the live database,
+ * so it also covers history and anything merged past the label.
+ */
+export function checkPendingMigrations(
+	pending: readonly PendingMigration[],
+	{ allowDestructive }: CheckMigrationsOptions,
+): MigrationFinding[] {
+	if (allowDestructive) return [];
+
+	return pending
+		.flatMap(({ name, sql }) =>
+			findDestructiveStatements(sql).map(
+				({ statement, line }): MigrationFinding => ({
+					path: `migrations/${name}`,
+					rule: 'destructive',
+					line,
+					message: `Pending migration has a destructive statement \`${statement}\`. A deploy applies pending migrations to the live database before the new code uploads. Review it, take a restore point if the tables hold data, then run the deploy manually with allow_destructive.`,
+				}),
+			),
+		)
+		.sort((a, b) => a.path.localeCompare(b.path) || (a.line ?? 0) - (b.line ?? 0));
 }

@@ -27,6 +27,7 @@ describe('findBlockingCheckRuns', () => {
 describe('decideRollback', () => {
 	const failed = {
 		smokeFailed: true,
+		deployFailed: false,
 		d1MigrationsApplied: 0,
 		durableObjectMigrationApplied: false,
 		previousVersionId: 'prev-version',
@@ -34,6 +35,27 @@ describe('decideRollback', () => {
 
 	it('does nothing when the smoke checks passed', () => {
 		expect(decideRollback({ ...failed, smokeFailed: false })).toEqual({ action: 'none' });
+	});
+
+	it('does nothing when the deploy step failed but the smoke checks passed', () => {
+		expect(decideRollback({ ...failed, smokeFailed: false, deployFailed: true })).toEqual({
+			action: 'none',
+		});
+	});
+
+	it('leaves recovery to a person when the deploy step failed and the smoke checks fail', () => {
+		const decision = decideRollback({ ...failed, deployFailed: true });
+
+		expect(decision).toEqual({
+			action: 'manual',
+			reasons: [expect.stringContaining('deploy step failed')],
+		});
+	});
+
+	it('lists a failed deploy next to the other reasons', () => {
+		const decision = decideRollback({ ...failed, deployFailed: true, d1MigrationsApplied: 1 });
+
+		expect(decision.action === 'manual' && decision.reasons).toHaveLength(2);
 	});
 
 	it('rolls back to the previous version when the release changed no schema', () => {
@@ -73,12 +95,13 @@ describe('decideRollback', () => {
 	it('lists every reason that blocks the automatic rollback', () => {
 		const decision = decideRollback({
 			smokeFailed: true,
+			deployFailed: true,
 			d1MigrationsApplied: 1,
 			durableObjectMigrationApplied: true,
 			previousVersionId: undefined,
 		});
 
 		expect(decision.action).toBe('manual');
-		expect(decision.action === 'manual' && decision.reasons).toHaveLength(3);
+		expect(decision.action === 'manual' && decision.reasons).toHaveLength(4);
 	});
 });

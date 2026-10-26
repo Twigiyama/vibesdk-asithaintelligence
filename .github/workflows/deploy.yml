@@ -2,7 +2,8 @@ name: Deploy
 
 # Manual only. Deploys a commit that is on main to the production Worker after
 # re-running CI on it and comparing the build with the live Worker. Normal
-# deploys never touch secrets; see sync-secrets.yml.
+# deploys never touch secrets; see sync-secrets.yml. A dry run does everything
+# up to the first write, so it proves the credentials and the configuration.
 on:
   workflow_dispatch:
     inputs:
@@ -11,8 +12,16 @@ on:
         type: string
         required: true
         default: main
+      dry_run:
+        description: Check everything, then stop before any write (no restore point, migrations or deploy).
+        type: boolean
+        default: false
       skip_migrations:
         description: Skip D1 migrations. Only for migrations that were applied by hand.
+        type: boolean
+        default: false
+      allow_destructive:
+        description: Allow pending D1 migrations that drop or rename data. Review them first.
         type: boolean
         default: false
       allow_missing_worker:
@@ -161,9 +170,33 @@ jobs:
           fi
           bun scripts/ci/preflight.ts "${args[@]}"
 
+      # Reads the migration files themselves, so history and anything merged past
+      # the pull request label is covered too.
+      - name: Check pending D1 migrations
+        if: ${{ !inputs.skip_migrations && steps.preflight.outputs.d1_pending_count != '0' }}
+        env:
+          PENDING: ${{ steps.preflight.outputs.d1_pending_names }}
+          ALLOW_DESTRUCTIVE: ${{ inputs.allow_destructive }}
+        run: bun scripts/ci/check-pending-migrations.ts --pending "$PENDING"
+
+      # The dry run steps write nothing: the upload is validated locally and the
+      # site is probed from the runner. `wrangler d1 migrations list` is left out
+      # on purpose, because it creates the migrations table when it is missing.
+      - name: Dry run of the upload
+        if: ${{ inputs.dry_run }}
+        run: bunx wrangler deploy --dry-run
+
+      - name: Smoke checks from the runner (dry run, informational)
+        id: dry_smoke
+        if: ${{ inputs.dry_run }}
+        continue-on-error: true
+        env:
+          CONFIG: ${{ steps.config.outputs.path }}
+        run: bun scripts/ci/smoke.ts --config "$CONFIG" --attempts 2 --delay 3
+
       - name: Record a D1 restore point
         id: bookmark
-        if: steps.config.outputs.d1_name != ''
+        if: ${{ !inputs.dry_run && steps.config.outputs.d1_name != '' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -181,7 +214,7 @@ jobs:
       # them additive, so the release that is still serving traffic keeps working.
       - name: Apply D1 migrations
         id: migrate
-        if: ${{ !inputs.skip_migrations && steps.preflight.outputs.d1_pending_count != '0' }}
+        if: ${{ !inputs.dry_run && !inputs.skip_migrations && steps.preflight.outputs.d1_pending_count != '0' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -190,9 +223,13 @@ jobs:
 
       # No --containers-rollout: wrangler 4.90 only accepts immediate or gradual.
       # The container image is pinned to the live registry reference, so a deploy
-      # leaves the container application unchanged.
+      # leaves the container application unchanged. Wrangler can fail after the
+      # new version is already live (routes, containers), so a failure here does
+      # not skip the smoke checks: the run is failed at the end instead.
       - name: Deploy
         id: deploy
+        if: ${{ !inputs.dry_run }}
+        continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -204,6 +241,7 @@ jobs:
 
       - name: Smoke checks
         id: smoke
+        if: ${{ !inputs.dry_run }}
         continue-on-error: true
         env:
           CONFIG: ${{ steps.config.outputs.path }}
@@ -211,20 +249,23 @@ jobs:
 
       - name: Decide on a rollback
         id: decision
+        if: ${{ !inputs.dry_run }}
         env:
           SMOKE_FAILED: ${{ steps.smoke.outcome == 'failure' }}
+          DEPLOY_FAILED: ${{ steps.deploy.outcome == 'failure' }}
           D1_APPLIED: ${{ steps.migrate.outcome == 'success' && steps.preflight.outputs.d1_pending_count || '0' }}
           DO_MIGRATION_APPLIED: ${{ steps.preflight.outputs.do_migrations_pending }}
           PREVIOUS_VERSION: ${{ steps.preflight.outputs.previous_version_id }}
         run: |
           bun scripts/ci/decide-rollback.ts \
             --smoke-failed "$SMOKE_FAILED" \
+            --deploy-failed "$DEPLOY_FAILED" \
             --d1-applied "$D1_APPLIED" \
             --do-migration-applied "$DO_MIGRATION_APPLIED" \
             --previous-version "$PREVIOUS_VERSION"
 
       - name: Roll back
-        if: steps.decision.outputs.action == 'rollback'
+        if: ${{ !inputs.dry_run && steps.decision.outputs.action == 'rollback' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -236,34 +277,53 @@ jobs:
             --version "$VERSION_ID" \
             --message "auto-rollback: smoke checks failed for $SHORT_SHA"
 
-      - name: Fail the run when the smoke checks failed
-        if: steps.smoke.outcome == 'failure'
+      - name: Fail the run when the deploy or the smoke checks failed
+        if: ${{ !inputs.dry_run && (steps.deploy.outcome == 'failure' || steps.smoke.outcome == 'failure') }}
+        env:
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
         run: |
-          echo "::error::The smoke checks failed after deploying $SHORT_SHA. See the rollback decision above and the rollback runbook in docs/ci-cd.md."
+          echo "::error::Deploying $SHORT_SHA ended with the deploy step $DEPLOY_OUTCOME and the smoke checks $SMOKE_OUTCOME. See the rollback decision above and the rollback runbook in docs/ci-cd.md."
           exit 1
 
       - name: Summary
         if: always()
         env:
+          DRY_RUN: ${{ inputs.dry_run }}
           VERSION_ID: ${{ steps.deploy.outputs.version_id }}
           BOOKMARK: ${{ steps.bookmark.outputs.bookmark }}
           D1_PENDING: ${{ steps.preflight.outputs.d1_pending_count }}
+          D1_PENDING_NAMES: ${{ steps.preflight.outputs.d1_pending_names }}
           MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
           DO_PENDING: ${{ steps.preflight.outputs.do_migrations_pending }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          DRY_SMOKE_OUTCOME: ${{ steps.dry_smoke.outcome }}
           ROLLBACK_ACTION: ${{ steps.decision.outputs.action }}
         run: |
           {
-            echo "### Production deploy"
-            echo
-            echo "| | |"
-            echo "| --- | --- |"
-            echo "| Commit | \`$SHA\` |"
-            echo "| Version tag | \`$SHORT_SHA\` |"
-            echo "| Worker version | \`${VERSION_ID:-not deployed}\` |"
-            echo "| D1 restore point | \`${BOOKMARK:-none}\` |"
-            echo "| D1 migrations | ${D1_PENDING:-0} pending, step ${MIGRATE_OUTCOME:-not run} |"
-            echo "| Durable Object migrations applied | ${DO_PENDING:-unknown} |"
-            echo "| Smoke checks | ${SMOKE_OUTCOME:-not run} |"
-            echo "| Rollback | ${ROLLBACK_ACTION:-not evaluated} |"
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "### Production deploy: dry run, nothing was written"
+              echo
+              echo "| | |"
+              echo "| --- | --- |"
+              echo "| Commit | \`$SHA\` |"
+              echo "| Pending D1 migrations | ${D1_PENDING:-unknown}: ${D1_PENDING_NAMES:-none} |"
+              echo "| Durable Object migrations pending | ${DO_PENDING:-unknown} |"
+              echo "| Smoke checks from the runner | ${DRY_SMOKE_OUTCOME:-not run} |"
+            else
+              echo "### Production deploy"
+              echo
+              echo "| | |"
+              echo "| --- | --- |"
+              echo "| Commit | \`$SHA\` |"
+              echo "| Version tag | \`$SHORT_SHA\` |"
+              echo "| Deploy step | ${DEPLOY_OUTCOME:-not run} |"
+              echo "| Worker version | \`${VERSION_ID:-not deployed}\` |"
+              echo "| D1 restore point | \`${BOOKMARK:-none}\` |"
+              echo "| D1 migrations | ${D1_PENDING:-0} pending, step ${MIGRATE_OUTCOME:-not run} |"
+              echo "| Durable Object migrations applied | ${DO_PENDING:-unknown} |"
+              echo "| Smoke checks | ${SMOKE_OUTCOME:-not run} |"
+              echo "| Rollback | ${ROLLBACK_ACTION:-not evaluated} |"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
