@@ -160,6 +160,7 @@ async function main(config: WranglerConfig, configPath: string): Promise<void> {
 		active_is_rollback: active ? isRollbackDeployment(active) : false,
 		do_migrations_pending: pendingTags.length > 0,
 		d1_pending_count: pendingD1.length,
+		d1_pending_names: pendingD1.join(','),
 	});
 
 	const errors = findings.filter((item) => item.severity === 'error').length;

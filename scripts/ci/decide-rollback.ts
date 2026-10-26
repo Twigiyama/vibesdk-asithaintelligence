@@ -3,7 +3,7 @@
  * Decides what to do after a deploy whose smoke checks ran.
  *
  *   bun scripts/ci/decide-rollback.ts --smoke-failed true|false --d1-applied N \
- *     --do-migration-applied true|false [--previous-version <id>]
+ *     --do-migration-applied true|false [--deploy-failed true|false] [--previous-version <id>]
  *
  * Writes `action` (none, rollback or manual) and `version_id` to the step
  * outputs. A manual outcome prints why as error annotations.
@@ -17,6 +17,7 @@ const { values } = parseArgs({
 	args: process.argv.slice(2),
 	options: {
 		'smoke-failed': { type: 'string' },
+		'deploy-failed': { type: 'string', default: 'false' },
 		'd1-applied': { type: 'string' },
 		'do-migration-applied': { type: 'string' },
 		'previous-version': { type: 'string', default: '' },
@@ -37,6 +38,7 @@ try {
 
 	const decision = decideRollback({
 		smokeFailed: readBoolean('smoke-failed', values['smoke-failed']),
+		deployFailed: readBoolean('deploy-failed', values['deploy-failed']),
 		d1MigrationsApplied: d1Applied,
 		durableObjectMigrationApplied: readBoolean('do-migration-applied', values['do-migration-applied']),
 		previousVersionId: values['previous-version'] || undefined,
